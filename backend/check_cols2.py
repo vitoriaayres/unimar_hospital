@@ -1,0 +1,12 @@
+import psycopg2
+conn = psycopg2.connect('postgresql://pharmapredict:pharmapredict_dev@localhost:5432/pharmapredict')
+cur = conn.cursor()
+cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'alerts' ORDER BY ordinal_position")
+for r in cur.fetchall(): print(r[0])
+print("---")
+cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'consumption' ORDER BY ordinal_position")
+for r in cur.fetchall(): print(r[0])
+print("---")
+cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'stock_movements' ORDER BY ordinal_position")
+for r in cur.fetchall(): print(r[0])
+conn.close()
