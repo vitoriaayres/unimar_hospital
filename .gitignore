@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+*.egg-info/
+dist/
+build/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+docker-compose.override.yml
+
+# Node
+node_modules/
+.next/
+out/
+
+# Data files (large)
+backend/ml/data/synthetic/
+backend/ml/data/csv/
+*.parquet
+*.csv
+
+# Token files
+backend/.cli_token
+
+# Logs
+*.log

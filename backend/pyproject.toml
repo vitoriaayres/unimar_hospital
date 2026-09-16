@@ -1,0 +1,176 @@
+[project]
+name = "pharmapredict-backend"
+version = "0.1.0"
+description = "PharmaPredict Backend API - Hospital Pharmacy Demand Prediction"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+
+dependencies = [
+    # Core
+    "fastapi[standard]>=0.110.0",
+    "uvicorn[standard]>=0.29.0",
+    "pydantic>=2.6.0",
+    "pydantic-settings>=2.2.0",
+    "pydantic-extra-types>=2.5.0",
+    "python-dotenv>=1.0.0",
+
+    # Database
+    "sqlalchemy[asyncio]>=2.0.25",
+    "alembic>=1.13.0",
+    "asyncpg>=0.29.0",
+    "psycopg2-binary>=2.9.9",
+
+    # Auth
+    "python-jose[cryptography]>=3.3.0",
+    "passlib[bcrypt]>=1.7.4",
+    "bcrypt>=4.0.0,<4.1.0",
+    "python-multipart>=0.0.6",
+
+    # ML
+    "mlflow>=2.10.0",
+    "scikit-learn>=1.4.0",
+    "lightgbm>=4.2.0",
+    "xgboost>=2.0.0",
+    "optuna>=3.6.0",
+    "pandas>=2.2.0",
+    "numpy>=1.26.0",
+    "polars>=0.19.0",
+
+    # Async Tasks
+    "celery[redis]>=5.3.0",
+    "redis>=5.0.0",
+    "flower>=2.0.0",
+
+    # Utils
+    "structlog>=24.1.0",
+    "python-json-logger>=2.0.0",
+    "httpx>=0.26.0",
+    "tenacity>=8.2.0",
+    "pyyaml>=6.0.1",
+    "email-validator>=2.1.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.1.0",
+    "pytest-mock>=3.12.0",
+    "httpx>=0.26.0",
+    "faker>=24.0.0",
+    "factory-boy>=3.3.0",
+    "testcontainers>=4.6.0",
+    "ruff>=0.3.0",
+    "mypy>=1.8.0",
+    "pre-commit>=3.6.0",
+    "types-python-jose>=3.3.0",
+    "types-passlib>=1.7.0",
+    "types-pyyaml>=6.0.0",
+]
+
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+indent-style = "space"
+indent-width = 4
+quote-style = "single"
+docstring-code-format = true
+docstring-code-line-length = 88
+
+[tool.ruff.lint]
+select = [
+    "E", "F", "I", "W", "UP", "B", "C4", "DTZ", "T10", "T20", "ICN", "PIE", "PT", "Q", "RSE", "RET", "SIM", "TID", "TRY", "PD", "PGH", "PL", "ARG", "PTH", "ERA", "NPY", "PER", "PLE", "PLW", "PLR", "TCH", "FLY", "INT", "ISC",
+]
+ignore = [
+    "ARG001", "ARG002", "B008", "C408", "D100", "D101", "D102", "D103", "D104", "D105", "D107", "PLR0913", "PLR0915", "TRY003",
+]
+per-file-ignores = { "tests/*" = ["S101", "D100", "D101", "D102", "D103", "D104", "D105", "D107"], "alembic/*" = ["D100", "D101", "D102", "D103", "D104", "D105", "D107"], "ml/*" = ["PLR0913", "PLR0915"] }
+
+[tool.ruff.format]
+quote-style = "single"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "lf"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+show_error_codes = true
+pretty = true
+namespace_packages = true
+explicit_package_bases = true
+
+[tool.mypy.overrides]
+module = [
+    "sqlalchemy.*",
+    "alembic.*",
+    "pydantic.*",
+    "fastapi.*",
+    "celery.*",
+    "mlflow.*",
+    "lightgbm.*",
+    "xgboost.*",
+    "optuna.*",
+    "polars.*",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "--strict-markers",
+    "--strict-config",
+    "--cov=app",
+    "--cov-report=term-missing",
+    "--cov-report=xml",
+    "--cov-fail-under=85",
+]
+markers = [
+    "unit: Unit tests",
+    "integration: Integration tests",
+    "slow: Slow tests",
+    "ml: ML-related tests",
+]
+
+[tool.coverage.run]
+source = ["app"]
+omit = [
+    "*/tests/*",
+    "*/migrations/*",
+    "*/alembic/*",
+    "*/__pycache__/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]
+
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*", "alembic*"]
+exclude = ["tests*", "ml*"]

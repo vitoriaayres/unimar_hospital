@@ -1,0 +1,265 @@
+# Configuração do Gerador de Dados Sintéticos - PharmaPredict
+# Baseado em literatura de farmácia hospitalar brasileira (ANVISA, SUS, estudos acadêmicos)
+
+simulation:
+  start_date: "2021-01-01"
+  end_date: "2024-12-31"
+  random_seed: 42
+
+hospital:
+  name: "Hospital Municipal São José"
+  beds: 350
+  departments:
+    - id: "icu"
+      name: "UTI Geral"
+      weight: 0.15
+      consumption_multiplier: 1.8
+      specialty: "critical_care"
+    - id: "er"
+      name: "Pronto Socorro"
+      weight: 0.25
+      consumption_multiplier: 1.3
+      specialty: "emergency"
+    - id: "ward"
+      name: "Enfermarias Clínicas"
+      weight: 0.45
+      consumption_multiplier: 1.0
+      specialty: "general"
+    - id: "outpatient"
+      name: "Ambulatório"
+      weight: 0.15
+      consumption_multiplier: 0.6
+      specialty: "outpatient"
+
+products:
+  count: 500
+  atc_distribution:
+    "J01": 0.20   # Antibióticos para uso sistêmico
+    "N02": 0.15   # Analgésicos
+    "B01": 0.10   # Antitrombóticos
+    "C07": 0.08   # Bloqueadores beta
+    "A02": 0.08   # Inibidores de bomba de prótons
+    "R03": 0.07   # Broncodilatadores
+    "N05": 0.06   # Psicolépticos
+    "C09": 0.05   # Inibidores da ECA
+    "H02": 0.04   # Corticosteroides
+    "OTHER": 0.17 # Demais classes
+
+  class_base_demand_per_100_beds:
+    "J01": 45   # Alta demanda - antibióticos
+    "N02": 60   # Muito alta - analgésicos
+    "B01": 25   # Moderada - anticoagulantes
+    "C07": 30   # Moderada - betabloqueadores
+    "A02": 35   # Moderada-alta - PPIs
+    "R03": 20   # Moderada - broncodilatadores
+    "N05": 15   # Baixa - psicotrópicos
+    "C09": 28   # Moderada - IECA
+    "H02": 12   # Baixa - corticoides
+    "OTHER": 22 # Média
+
+  unit_cost_ranges:
+    "J01": [5, 150]      # Antibióticos
+    "N02": [1, 80]       # Analgésicos
+    "B01": [10, 300]     # Anticoagulantes
+    "C07": [2, 50]       # Betabloqueadores
+    "A02": [3, 60]       # PPIs
+    "R03": [8, 120]      # Broncodilatadores
+    "N05": [5, 200]      # Psicotrópicos
+    "C09": [4, 80]       # IECA
+    "H02": [3, 90]       # Corticoides
+    "OTHER": [2, 100]    # Outros
+
+  controlled_substance_probability: 0.08
+  min_stock_multiplier: 0.15
+  max_stock_multiplier: 2.5
+  lead_time_days:
+    mean: 7
+    std: 3
+    min: 1
+    max: 30
+
+seasonality:
+  enabled: true
+  fourier_terms: 3
+  amplitude: 0.25
+
+  holidays_br:
+    - name: "Carnaval"
+      dates:
+        - "2021-02-15"
+        - "2021-02-16"
+        - "2022-02-28"
+        - "2022-03-01"
+        - "2023-02-20"
+        - "2023-02-21"
+        - "2024-02-12"
+        - "2024-02-13"
+      effect: 0.35
+      window_days: 7
+
+    - name: "Semana_Santa"
+      dates:
+        - "2021-04-02"
+        - "2022-04-15"
+        - "2023-04-07"
+        - "2024-03-29"
+      effect: 0.25
+      window_days: 4
+
+    - name: "Tiradentes"
+      dates:
+        - "2021-04-21"
+        - "2022-04-21"
+        - "2023-04-21"
+        - "2024-04-21"
+      effect: 0.15
+      window_days: 3
+
+    - name: "Dia_do_Trabalho"
+      dates:
+        - "2021-05-01"
+        - "2022-05-01"
+        - "2023-05-01"
+        - "2024-05-01"
+      effect: 0.15
+      window_days: 3
+
+    - name: "Corpus_Christi"
+      dates:
+        - "2021-06-03"
+        - "2022-06-16"
+        - "2023-06-08"
+        - "2024-05-30"
+      effect: 0.20
+      window_days: 3
+
+    - name: "Independencia"
+      dates:
+        - "2021-09-07"
+        - "2022-09-07"
+        - "2023-09-07"
+        - "2024-09-07"
+      effect: 0.15
+      window_days: 3
+
+    - name: "Nossa_Senhora_Aparecida"
+      dates:
+        - "2021-10-12"
+        - "2022-10-12"
+        - "2023-10-12"
+        - "2024-10-12"
+      effect: 0.20
+      window_days: 3
+
+    - name: "Finados"
+      dates:
+        - "2021-11-02"
+        - "2022-11-02"
+        - "2023-11-02"
+        - "2024-11-02"
+      effect: 0.15
+      window_days: 3
+
+    - name: "Proclamacao_Republica"
+      dates:
+        - "2021-11-15"
+        - "2022-11-15"
+        - "2023-11-15"
+        - "2024-11-15"
+      effect: 0.15
+      window_days: 3
+
+    - name: "Natal"
+      dates:
+        - "2021-12-25"
+        - "2022-12-25"
+        - "2023-12-25"
+        - "2024-12-25"
+      effect: 0.30
+      window_days: 7
+
+    - name: "Ano_Novo"
+      dates:
+        - "2021-01-01"
+        - "2022-01-01"
+        - "2023-01-01"
+        - "2024-01-01"
+        - "2025-01-01"
+      effect: 0.25
+      window_days: 5
+
+  # Padrões sazonais específicos por classe ATC
+  class_seasonality:
+    "J01": # Antibióticos - mais no inverno
+      winter_multiplier: 1.4
+      summer_multiplier: 0.8
+    "R03": # Broncodilatadores - mais no inverno/seca
+      winter_multiplier: 1.5
+      summer_multiplier: 0.7
+    "N02": # Analgésicos - estável
+      winter_multiplier: 1.1
+      summer_multiplier: 0.95
+    "A02": # PPIs - mais no final de ano (estresse/dieta)
+      november_multiplier: 1.2
+      december_multiplier: 1.3
+      january_multiplier: 1.15
+
+suppliers:
+  count: 12
+  tiers:
+    - name: "distribuidor_nacional"
+      count: 4
+      lead_time_days: {mean: 5, std: 2, min: 2, max: 10}
+      reliability: 0.95
+      fill_rate: 0.92
+      min_order_value: 5000
+
+    - name: "distribuidor_regional"
+      count: 5
+      lead_time_days: {mean: 3, std: 1, min: 1, max: 7}
+      reliability: 0.92
+      fill_rate: 0.88
+      min_order_value: 2000
+
+    - name: "fabricante_direto"
+      count: 3
+      lead_time_days: {mean: 14, std: 5, min: 7, max: 30}
+      reliability: 0.88
+      fill_rate: 0.95
+      min_order_value: 10000
+
+inventory_policy:
+  review_period_days: 7
+  service_level: 0.95
+  safety_stock_method: "demand_variability"  # ou "fixed_days"
+  safety_stock_days: 14
+  fefo_enabled: true
+  expiry_alert_days: 90
+  auto_reorder: true
+  max_order_frequency_days: 3
+
+consumption_noise:
+  distribution: "negative_binomial"  # Dados de contagem superdispersos
+  dispersion: 1.8
+  zero_inflation: 0.08
+  min_consumption: 0
+
+stockout_cascade:
+  enabled: true
+  hawkes_baseline: 0.002
+  hawkes_alpha: 0.35
+  hawkes_beta: 0.15
+  emergency_order_multiplier: 2.5
+  emergency_lead_time_reduction: 0.5
+  stockout_cost_multiplier: 5.0
+
+prescription_patterns:
+  routine: 0.70
+  emergency: 0.20
+  prophylactic: 0.10
+
+output:
+  format: "parquet"
+  partition_by: "month"
+  compression: "snappy"
+  include_metadata: true
