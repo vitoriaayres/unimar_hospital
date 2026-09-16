@@ -225,7 +225,8 @@ class ProdutosView(Static):
 
     @on(DataTable.RowHighlighted, "#tbl")
     def on_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
-        self._show_detail(event.row_index)
+        if event.row_key.value is not None:
+            self._show_detail(event.cursor_row)
 
     @on(Input.Changed, "#search")
     def on_search(self):
@@ -333,7 +334,8 @@ class AlertasView(Static):
 
     @on(DataTable.RowHighlighted, "#tbl")
     def on_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
-        self._show_detail(event.row_index)
+        if event.row_key.value is not None:
+            self._show_detail(event.cursor_row)
 
     @on(Input.Changed, "#search")
     def on_search(self):
@@ -453,7 +455,8 @@ class VencimentoView(Static):
 
     @on(DataTable.RowHighlighted, "#tbl")
     def on_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
-        self._show_detail(event.row_index)
+        if event.row_key.value is not None:
+            self._show_detail(event.cursor_row)
 
     @on(Input.Changed, "#search")
     def on_search(self):
@@ -560,7 +563,8 @@ class EstoqueView(Static):
 
     @on(DataTable.RowHighlighted, "#tbl")
     def on_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
-        self._show_detail(event.row_index)
+        if event.row_key.value is not None:
+            self._show_detail(event.cursor_row)
 
     @on(Input.Changed, "#search")
     def on_search(self):
@@ -737,7 +741,8 @@ class MovimentacoesView(Static):
 
     @on(DataTable.RowHighlighted, "#tbl")
     def on_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
-        self._show_detail(event.row_index)
+        if event.row_key.value is not None:
+            self._show_detail(event.cursor_row)
 
     @on(Input.Changed, "#search")
     def on_search(self):
@@ -809,7 +814,8 @@ class UsuariosView(Static):
 
     @on(DataTable.RowHighlighted, "#tbl")
     def on_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
-        self._show_detail(event.row_index)
+        if event.row_key.value is not None:
+            self._show_detail(event.cursor_row)
 
 
 # --------------- App ---------------
