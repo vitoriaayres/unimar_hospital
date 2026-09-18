@@ -1,11 +1,12 @@
 """ABHU TUI - Terminal interface for hospital pharmacy management.
-Click rows or press Enter for details. Press 1-8 to navigate views."""
+Click rows or press Enter for details. Press 1-9 to navigate views."""
 
 import urllib.request
+import urllib.error
 import json as _json
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.widgets import Header, Footer, Static, DataTable, Label, Button, Sparkline, Input, Rule
+from textual.widgets import Header, Footer, Static, DataTable, Label, Button, Sparkline, Input, RadioSet, RadioButton
 from textual.css.query import NoMatches
 from textual.binding import Binding
 from textual import on
@@ -29,6 +30,34 @@ def api_get(path, params=None):
             return _json.loads(resp.read())
     except Exception:
         return None
+
+
+def api_post(path, data):
+    """POST request to the API. Returns (success, result)."""
+    global _token
+    if not _token:
+        return False, "Nao autenticado"
+    try:
+        url = f"{API_URL}{path}"
+        body = _json.dumps(data).encode()
+        req = urllib.request.Request(
+            url, data=body,
+            headers={
+                "Authorization": f"Bearer {_token}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return True, _json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        try:
+            err = _json.loads(e.read())
+            return False, err.get("detail", str(e))
+        except Exception:
+            return False, str(e)
+    except Exception as e:
+        return False, str(e)
 
 
 def pg_query(sql, params=None):
@@ -1055,6 +1084,387 @@ class UsuariosView(Static):
             self._on_detail_click()
 
 
+# --------------- Cadastro ---------------
+
+CATEGORIES = [
+    "antibiotic", "analgesic", "antithrombotic", "beta_blocker",
+    "ppi", "bronchodilator", "psycholeptic", "ace_inhibitor",
+    "corticosteroid", "other",
+]
+
+MOVEMENT_TYPES = ["in", "out", "adjustment", "transfer", "loss"]
+
+
+class CadastroView(Static):
+    """Tela de cadastro: Produto, Lote, Movimentacao."""
+    _current_tab = "produto"
+    _products_cache = []
+    _warehouses_cache = []
+    _selected_product_id = None
+    _selected_warehouse_id = None
+    _selected_category = "other"
+    _selected_movement_type = "in"
+    _batches_cache = []
+
+    def compose(self) -> ComposeResult:
+        yield Label("  [bold]Cadastro[/]", classes="view-title")
+        with Horizontal(id="tab-bar"):
+            yield Button("Novo Produto", id="tab-produto", classes="filter-btn -active")
+            yield Button("Novo Lote", id="tab-lote", classes="filter-btn")
+            yield Button("Nova Movimentacao", id="tab-mov", classes="filter-btn")
+        yield Label("", id="msg")
+        # --- Tab: Produto ---
+        with Vertical(id="form-produto", classes="form-panel"):
+            yield Label("[bold]Cadastrar Novo Produto[/]", classes="form-title")
+            with Horizontal():
+                yield Label("Nome:", classes="field-label")
+                yield Input(placeholder="Nome do produto", id="prod-name", classes="field-input")
+            with Horizontal():
+                yield Label("SKU:", classes="field-label")
+                yield Input(placeholder="Codigo SKU", id="prod-sku", classes="field-input")
+            with Horizontal():
+                yield Label("Nome Generic:", classes="field-label")
+                yield Input(placeholder="Nome generico (opcional)", id="prod-generic", classes="field-input")
+            with Horizontal():
+                yield Label("Categoria:", classes="field-label")
+                yield Button("other", id="cat-btn", classes="filter-btn -active")
+            with Horizontal():
+                yield Label("Custo Unit.:", classes="field-label")
+                yield Input(placeholder="0.00", id="prod-cost", classes="field-input")
+            with Horizontal():
+                yield Label("Est. Min:", classes="field-label")
+                yield Input(placeholder="10", id="prod-min", classes="field-input")
+                yield Label("Est. Max:", classes="field-label")
+                yield Input(placeholder="100", id="prod-max", classes="field-input")
+            with Horizontal():
+                yield Label("Unidade:", classes="field-label")
+                yield Input(placeholder="un", id="prod-unit", classes="field-input")
+                yield Label("Prazo Entrega:", classes="field-label")
+                yield Input(placeholder="7", id="prod-lead", classes="field-input")
+            yield Button("Cadastrar Produto", id="btn-save-product", classes="save-btn")
+        # --- Tab: Lote ---
+        with Vertical(id="form-lote", classes="form-panel hidden"):
+            yield Label("[bold]Cadastrar Novo Lote[/]", classes="form-title")
+            yield Label("[dim]Produtos existentes (clique para selecionar):[/]")
+            yield DataTable(id="prod-select", classes="select-table")
+            yield Label("Produto selecionado: [dim]nenhum[/]", id="selected-prod-label")
+            with Horizontal():
+                yield Label("Lote:", classes="field-label")
+                yield Input(placeholder="Numero do lote", id="batch-num", classes="field-input")
+            with Horizontal():
+                yield Label("Quantidade:", classes="field-label")
+                yield Input(placeholder="100", id="batch-qty", classes="field-input")
+            with Horizontal():
+                yield Label("Validade:", classes="field-label")
+                yield Input(placeholder="2027-12-31", id="batch-expiry", classes="field-input")
+            with Horizontal():
+                yield Label("Fabricacao:", classes="field-label")
+                yield Input(placeholder="2026-01-15 (opcional)", id="batch-mfg", classes="field-input")
+            with Horizontal():
+                yield Label("Custo Unit.:", classes="field-label")
+                yield Input(placeholder="0.00", id="batch-cost", classes="field-input")
+            yield Label("[dim]Almoxarifados:[/]")
+            yield DataTable(id="wh-select", classes="select-table")
+            yield Label("Almoxarifado selecionado: [dim]nenhum[/]", id="selected-wh-label")
+            yield Button("Cadastrar Lote", id="btn-save-batch", classes="save-btn")
+        # --- Tab: Movimentacao ---
+        with Vertical(id="form-mov", classes="form-panel hidden"):
+            yield Label("[bold]Registrar Movimentacao[/]", classes="form-title")
+            yield Label("[dim]Lotes existentes (clique para selecionar):[/]")
+            yield DataTable(id="batch-select", classes="select-table")
+            yield Label("Lote selecionado: [dim]nenhum[/]", id="selected-batch-label")
+            with Horizontal():
+                yield Label("Tipo:", classes="field-label")
+                yield Button("in", id="mov-btn", classes="filter-btn -active")
+            with Horizontal():
+                yield Label("Quantidade:", classes="field-label")
+                yield Input(placeholder="+100 ou -50", id="mov-qty", classes="field-input")
+            with Horizontal():
+                yield Label("Notas:", classes="field-label")
+                yield Input(placeholder="Observacoes (opcional)", id="mov-notes", classes="field-input")
+            yield Button("Registrar Movimentacao", id="btn-save-mov", classes="save-btn")
+
+    def on_mount(self) -> None:
+        # Load products and warehouses for selection
+        self.__class__._products_cache = pg_query(
+            "SELECT id, name, sku, category FROM products WHERE is_active = true ORDER BY name LIMIT 50"
+        )
+        self.__class__._warehouses_cache = pg_query(
+            "SELECT id, name, location FROM warehouses ORDER BY name"
+        )
+        self._fill_product_select()
+        self._fill_warehouse_select()
+        self._fill_batch_select()
+
+    def _fill_product_select(self):
+        try:
+            t = self.query_one("#prod-select", DataTable)
+            t.add_columns("Produto", "SKU", "Categoria")
+            t.cursor_type = "row"
+            for p in self._products_cache[:30]:
+                t.add_row(
+                    (p.get("name") or "-")[:35],
+                    p.get("sku", "-"),
+                    p.get("category", "-"),
+                )
+        except Exception:
+            pass
+
+    def _fill_warehouse_select(self):
+        try:
+            t = self.query_one("#wh-select", DataTable)
+            t.add_columns("Almoxarifado", "Localizacao")
+            t.cursor_type = "row"
+            for w in self._warehouses_cache:
+                t.add_row(
+                    w.get("name", "-"),
+                    w.get("location", "-") or "-",
+                )
+        except Exception:
+            pass
+
+    def _fill_batch_select(self):
+        try:
+            batches = pg_query(
+                "SELECT ib.id, ib.batch_number, p.name, ib.quantity, ib.status "
+                "FROM inventory_batches ib JOIN products p ON ib.product_id = p.id "
+                "WHERE ib.status = 'available' ORDER BY p.name LIMIT 50"
+            )
+            t = self.query_one("#batch-select", DataTable)
+            t.add_columns("Produto", "Lote", "Qtd", "Status")
+            t.cursor_type = "row"
+            for b in batches:
+                sc = "green" if b["status"] == "available" else "yellow"
+                t.add_row(
+                    (b.get("name") or "-")[:30],
+                    b.get("batch_number", "-"),
+                    f"{b.get('quantity', 0):,}",
+                    f"[{sc}]{b.get('status', '-')}[/]",
+                )
+            self.__class__._batches_cache = batches
+        except Exception:
+            self.__class__._batches_cache = []
+
+    def _show_tab(self, tab: str):
+        self.__class__._current_tab = tab
+        for name in ("produto", "lote", "mov"):
+            try:
+                panel = self.query_one(f"#form-{name}", Vertical)
+                panel.classes = "form-panel" if name == tab else "form-panel hidden"
+            except NoMatches:
+                pass
+        for name in ("produto", "lote", "mov"):
+            try:
+                btn = self.query_one(f"#tab-{name}", Button)
+                btn.classes = "filter-btn -active" if name == tab else "filter-btn"
+            except NoMatches:
+                pass
+
+    def _set_msg(self, text, color="green"):
+        try:
+            self.query_one("#msg", Label).update(f"  [{color}]{text}[/]")
+        except Exception:
+            pass
+
+    # ---- Produto ----
+
+    def _save_product(self):
+        name = self.query_one("#prod-name", Input).value.strip()
+        sku = self.query_one("#prod-sku", Input).value.strip()
+        if not name or not sku:
+            self._set_msg("Preencha Nome e SKU!", "red")
+            return
+        generic = self.query_one("#prod-generic", Input).value.strip() or None
+        cost = float(self.query_one("#prod-cost", Input).value or "0")
+        min_s = int(self.query_one("#prod-min", Input).value or "10")
+        max_s = int(self.query_one("#prod-max", Input).value or "100")
+        unit = self.query_one("#prod-unit", Input).value.strip() or "un"
+        lead = int(self.query_one("#prod-lead", Input).value or "7")
+        payload = {
+            "sku": sku,
+            "name": name,
+            "generic_name": generic,
+            "category": self._selected_category,
+            "unit": unit,
+            "unit_cost": str(cost),
+            "min_stock_level": min_s,
+            "max_stock_level": max_s,
+            "lead_time_days": lead,
+            "controlled_substance": False,
+        }
+        ok, result = api_post("/products", payload)
+        if ok:
+            self._set_msg(f"Produto '{name}' cadastrado com sucesso!")
+            self.query_one("#prod-name", Input).value = ""
+            self.query_one("#prod-sku", Input).value = ""
+            self.query_one("#prod-generic", Input).value = ""
+            self.query_one("#prod-cost", Input).value = ""
+            # Refresh product list
+            self.__class__._products_cache = pg_query(
+                "SELECT id, name, sku, category FROM products WHERE is_active = true ORDER BY name LIMIT 50"
+            )
+        else:
+            self._set_msg(f"Erro: {result}", "red")
+
+    # ---- Lote ----
+
+    def _save_batch(self):
+        if self._selected_product_id is None:
+            self._set_msg("Selecione um produto na tabela!", "red")
+            return
+        if self._selected_warehouse_id is None:
+            self._set_msg("Selecione um almoxarifado na tabela!", "red")
+            return
+        batch_num = self.query_one("#batch-num", Input).value.strip()
+        qty = self.query_one("#batch-qty", Input).value.strip()
+        expiry = self.query_one("#batch-expiry", Input).value.strip()
+        if not batch_num or not qty or not expiry:
+            self._set_msg("Preencha Lote, Quantidade e Validade!", "red")
+            return
+        mfg = self.query_one("#batch-mfg", Input).value.strip() or None
+        cost = float(self.query_one("#batch-cost", Input).value or "0")
+        payload = {
+            "product_id": self._selected_product_id,
+            "warehouse_id": self._selected_warehouse_id,
+            "batch_number": batch_num,
+            "quantity": int(qty),
+            "expiry_date": expiry,
+            "manufacture_date": mfg,
+            "unit_cost": str(cost),
+        }
+        ok, result = api_post("/inventory/batches", payload)
+        if ok:
+            self._set_msg(f"Lote '{batch_num}' cadastrado com sucesso!")
+            self.query_one("#batch-num", Input).value = ""
+            self.query_one("#batch-qty", Input).value = ""
+            self.query_one("#batch-expiry", Input).value = ""
+            self.query_one("#batch-mfg", Input).value = ""
+            self.query_one("#batch-cost", Input).value = ""
+        else:
+            self._set_msg(f"Erro: {result}", "red")
+
+    # ---- Movimentacao ----
+
+    def _save_movement(self):
+        if not hasattr(self, "_batches_cache") or not self._batches_cache:
+            self._set_msg("Nenhum lote disponivel!", "red")
+            return
+        try:
+            t = self.query_one("#batch-select", DataTable)
+            idx = t.cursor_row
+            if idx < 0 or idx >= len(self._batches_cache):
+                self._set_msg("Selecione um lote na tabela!", "red")
+                return
+            batch_id = str(self._batches_cache[idx]["id"])
+        except Exception:
+            self._set_msg("Selecione um lote na tabela!", "red")
+            return
+        qty_str = self.query_one("#mov-qty", Input).value.strip()
+        if not qty_str:
+            self._set_msg("Preencha a quantidade!", "red")
+            return
+        qty = int(qty_str)
+        mtype = self._selected_movement_type
+        if mtype in ("out", "loss") and qty > 0:
+            qty = -qty
+        elif mtype in ("in",) and qty < 0:
+            qty = abs(qty)
+        notes = self.query_one("#mov-notes", Input).value.strip() or None
+        payload = {
+            "batch_id": batch_id,
+            "movement_type": mtype,
+            "quantity_change": qty,
+            "notes": notes,
+        }
+        ok, result = api_post("/inventory/movements", payload)
+        if ok:
+            self._set_msg(f"Movimentacao registrada: {mtype} {qty:+d}")
+            self.query_one("#mov-qty", Input).value = ""
+            self.query_one("#mov-notes", Input).value = ""
+        else:
+            self._set_msg(f"Erro: {result}", "red")
+
+    # ---- Eventos ----
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        btn_id = event.button.id
+
+        # Tabs
+        if btn_id.startswith("tab-"):
+            self._show_tab(btn_id.replace("tab-", ""))
+            return
+
+        # Category cycle
+        if btn_id == "cat-btn":
+            cur = self._selected_category
+            idx = CATEGORIES.index(cur) if cur in CATEGORIES else 0
+            next_cat = CATEGORIES[(idx + 1) % len(CATEGORIES)]
+            self.__class__._selected_category = next_cat
+            try:
+                self.query_one("#cat-btn", Button).label = next_cat
+            except Exception:
+                pass
+            return
+
+        # Movement type cycle
+        if btn_id == "mov-btn":
+            cur = self._selected_movement_type
+            idx = MOVEMENT_TYPES.index(cur) if cur in MOVEMENT_TYPES else 0
+            next_mt = MOVEMENT_TYPES[(idx + 1) % len(MOVEMENT_TYPES)]
+            self.__class__._selected_movement_type = next_mt
+            try:
+                self.query_one("#mov-btn", Button).label = next_mt
+            except Exception:
+                pass
+            return
+
+        # Save buttons
+        if btn_id == "btn-save-product":
+            self._save_product()
+        elif btn_id == "btn-save-batch":
+            self._save_batch()
+        elif btn_id == "btn-save-mov":
+            self._save_movement()
+
+    @on(DataTable.RowHighlighted, "#prod-select")
+    def on_prod_selected(self, event: DataTable.RowHighlighted) -> None:
+        idx = event.cursor_row
+        if idx is not None and idx >= 0 and idx < len(self._products_cache):
+            p = self._products_cache[idx]
+            self.__class__._selected_product_id = str(p["id"])
+            try:
+                self.query_one("#selected-prod-label", Label).update(
+                    f"Produto selecionado: [bold green]{p.get('name', '-')}[/] ({p.get('sku', '-')})"
+                )
+            except Exception:
+                pass
+
+    @on(DataTable.RowHighlighted, "#wh-select")
+    def on_wh_selected(self, event: DataTable.RowHighlighted) -> None:
+        idx = event.cursor_row
+        if idx is not None and idx >= 0 and idx < len(self._warehouses_cache):
+            w = self._warehouses_cache[idx]
+            self.__class__._selected_warehouse_id = str(w["id"])
+            try:
+                self.query_one("#selected-wh-label", Label).update(
+                    f"Almoxarifado selecionado: [bold green]{w.get('name', '-')}[/]"
+                )
+            except Exception:
+                pass
+
+    @on(DataTable.RowHighlighted, "#batch-select")
+    def on_batch_selected(self, event: DataTable.RowHighlighted) -> None:
+        idx = event.cursor_row
+        if hasattr(self, "_batches_cache") and idx is not None and idx >= 0 and idx < len(self._batches_cache):
+            b = self._batches_cache[idx]
+            try:
+                self.query_one("#selected-batch-label", Label).update(
+                    f"Lote selecionado: [bold green]{b.get('name', '-')}[/] Lote: {b.get('batch_number', '-')} Qtd: {b.get('quantity', 0):,}"
+                )
+            except Exception:
+                pass
+
+
 # --------------- App ---------------
 
 VIEW_MAP = {
@@ -1066,6 +1476,7 @@ VIEW_MAP = {
     "6": ConsumoView,
     "7": MovimentacoesView,
     "8": UsuariosView,
+    "9": CadastroView,
 }
 
 
@@ -1120,6 +1531,23 @@ class ABHUApp(App):
     #hint { color: $text-muted; padding: 0 2; }
     #summary { width: 100%; padding: 0 2; }
     #detail-bar { padding: 0 2; }
+    .form-panel { padding: 0 2; }
+    .form-panel.hidden { display: none; }
+    .form-title { text-style: bold; color: $accent; margin: 1 0; }
+    .field-label { width: 14; min-width: 14; padding: 0 1; color: $text-muted; }
+    .field-input { width: 1fr; min-width: 20; margin: 0 1; }
+    .save-btn {
+        margin: 1 2;
+        min-height: 3;
+        min-width: 25;
+        background: $accent;
+        color: $text;
+        text-style: bold;
+        border: solid $accent;
+    }
+    .save-btn:hover { background: $accent 80%; }
+    .select-table { height: 10; margin: 0 2; }
+    #tab-bar { padding: 0 2; }
     """
 
     BINDINGS = [
@@ -1131,6 +1559,7 @@ class ABHUApp(App):
         Binding("6", "show_view('6')", "Consumo", show=True),
         Binding("7", "show_view('7')", "Movimentacoes", show=True),
         Binding("8", "show_view('8')", "Usuarios", show=True),
+        Binding("9", "show_view('9')", "Cadastro", show=True),
         Binding("q", "quit", "Sair", show=True),
     ]
 
@@ -1146,7 +1575,7 @@ class ABHUApp(App):
         with Horizontal():
             with Vertical(id="sidebar"):
                 yield Label("[bold cyan]ABHU[/]")
-                yield Label("[dim]v3.0[/]")
+                yield Label("[dim]v3.1[/]")
                 yield Label("")
                 yield Button("1 Dashboard", id="btn-1", classes="-active")
                 yield Button("2 Produtos", id="btn-2")
@@ -1156,6 +1585,7 @@ class ABHUApp(App):
                 yield Button("6 Consumo", id="btn-6")
                 yield Button("7 Movimentacoes", id="btn-7")
                 yield Button("8 Usuarios", id="btn-8")
+                yield Button("9 Cadastro", id="btn-9")
                 yield Label("")
                 yield Button("q Sair", id="btn-q")
             with Vertical(id="content"):
@@ -1167,6 +1597,7 @@ class ABHUApp(App):
                 yield ConsumoView(id="v-6", classes="hidden")
                 yield MovimentacoesView(id="v-7", classes="hidden")
                 yield UsuariosView(id="v-8", classes="hidden")
+                yield CadastroView(id="v-9", classes="hidden")
         yield Footer()
 
     def _show_view(self, key: str):
@@ -1179,7 +1610,7 @@ class ABHUApp(App):
             self.query_one(f"#v-{key}").display = True
         except NoMatches:
             pass
-        for k in "12345678":
+        for k in "123456789":
             try:
                 btn = self.query_one(f"#btn-{k}", Button)
                 btn.classes = "-active" if k == key else ""
