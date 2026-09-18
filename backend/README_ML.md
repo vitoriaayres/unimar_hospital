@@ -272,4 +272,4 @@ python ml/seed_db.py
 
 ## Licença
 
-Projeto acadêmico - UNIMAR (Universidade Maringá)
+Projeto acadêmico - UNIMAR (Universidade Marília)
