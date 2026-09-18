@@ -11,7 +11,7 @@ from app.api.deps import get_current_user, get_db
 from app.models import Product, User, UserRole
 from app.schemas.product import ProductCreate, ProductListParams, ProductListResponse, ProductResponse, ProductUpdate
 
-router = APIRouter()
+router = APIRouter(prefix="/products")
 
 
 def _check_manager_or_admin(user: User) -> None:

@@ -71,6 +71,9 @@ class SyntheticDataGenerator:
         self._primary_warehouse_id: UUID | None = None
         self._products_by_id: dict[UUID, Product] = {}
 
+        # Pareto demand weights (initialized during product generation)
+        self._product_demand_weights: dict[UUID, float] = {}
+
     def generate_all(self) -> dict[str, pl.DataFrame]:
         print("[INFO] Iniciando geracao de dados sinteticos para PharmaPredict...")
         print(f"   Período: {self.start_date} a {self.end_date}")
@@ -292,6 +295,38 @@ class SyntheticDataGenerator:
         for p in self.products:
             self._products_by_id[p.id] = p
 
+        # Generate Pareto demand weights for realistic consumption distribution
+        self._generate_pareto_demand_weights()
+
+    def _generate_pareto_demand_weights(self) -> None:
+        """Generate Pareto-distributed demand weights for products.
+        
+        Implements the 80/20 rule: ~20% of products account for ~80% of consumption.
+        This creates realistic demand heterogeneity found in hospital pharmacies.
+        """
+        n_products = len(self.products)
+        
+        # Generate Pareto-distributed weights
+        # Alpha=1.16 gives approximately 80/20 distribution
+        pareto_alpha = self.config.get("consumption_noise", {}).get("pareto_alpha", 1.16)
+        raw_weights = self.rng.pareto(pareto_alpha, n_products) + 1
+        
+        # Sort weights (highest first) and assign to products
+        sorted_indices = np.argsort(-raw_weights)
+        
+        # Normalize weights so they sum to 1
+        normalized_weights = raw_weights / raw_weights.sum()
+        
+        # Assign weights to products
+        for i, product in enumerate(self.products):
+            self._product_demand_weights[product.id] = float(normalized_weights[i])
+        
+        # Verify Pareto distribution (for logging)
+        sorted_weights = np.sort(normalized_weights)[::-1]
+        top_20_pct = int(n_products * 0.2)
+        top_20_sum = sorted_weights[:top_20_pct].sum() * 100
+        print(f"      Pareto: top 20% products = {top_20_pct}/{n_products} = {top_20_sum:.1f}% of demand")
+
     def _get_generic_names(self, atc: str) -> list[str]:
         names = {
             "J01": ["Amoxicilina", "Ceftriaxona", "Azitromicina", "Ciprofloxacino", "Meropenem", "Piperacilina/Tazobactam", "Vancomicina", "Linezolida", "Cefepima", "Ertapenem"],
@@ -375,11 +410,76 @@ class SyntheticDataGenerator:
 
         print(f"      {len(self.batches)} lotes iniciais criados")
 
+    def _generate_outbreak_events(self) -> dict[date, float]:
+        """Generate seasonal outbreak events (flu, respiratory infections).
+        
+        Returns a dict mapping dates to outbreak multipliers (>1.0 means increased consumption).
+        Simulates 2-3 outbreaks per year with varying intensity and duration.
+        """
+        outbreak_mults = {}
+        
+        # Generate outbreaks for each year in the simulation period
+        current_year = self.start_date.year
+        end_year = self.end_date.year
+        
+        while current_year <= end_year:
+            # Flu season outbreak (May-August in Brazil)
+            flu_start_month = self.rng.integers(4, 6)  # April or May
+            flu_duration_days = int(self.rng.integers(21, 42))  # 3-6 weeks
+            flu_peak_multiplier = self.rng.uniform(1.8, 2.5)  # 80-150% increase
+            
+            flu_start = date(current_year, flu_start_month, self.rng.integers(1, 15))
+            for day_offset in range(flu_duration_days):
+                current_date = flu_start + timedelta(days=day_offset)
+                if self.start_date <= current_date <= self.end_date:
+                    # Bell curve shape for outbreak intensity
+                    progress = day_offset / flu_duration_days
+                    intensity = np.exp(-((progress - 0.5) ** 2) / 0.08)  # Bell curve centered at 50%
+                    outbreak_mults[current_date] = 1.0 + (flu_peak_multiplier - 1.0) * intensity
+            
+            # Secondary outbreak (respiratory infections, July-September)
+            if self.rng.random() < 0.7:  # 70% chance of secondary outbreak
+                resp_start_month = self.rng.integers(6, 8)
+                resp_duration_days = int(self.rng.integers(14, 28))
+                resp_peak_multiplier = self.rng.uniform(1.4, 1.8)
+                
+                resp_start = date(current_year, resp_start_month, self.rng.integers(1, 20))
+                for day_offset in range(resp_duration_days):
+                    current_date = resp_start + timedelta(days=day_offset)
+                    if self.start_date <= current_date <= self.end_date:
+                        progress = day_offset / resp_duration_days
+                        intensity = np.exp(-((progress - 0.5) ** 2) / 0.08)
+                        # Add to existing multiplier if date already has one
+                        existing = outbreak_mults.get(current_date, 1.0)
+                        outbreak_mults[current_date] = existing * (1.0 + (resp_peak_multiplier - 1.0) * intensity)
+            
+            # Holiday-related spikes (Christmas/New Year)
+            if self.rng.random() < 0.5:  # 50% chance of holiday spike
+                holiday_start = date(current_year, 12, 20)
+                holiday_duration = int(self.rng.integers(7, 14))
+                holiday_multiplier = self.rng.uniform(1.2, 1.5)
+                
+                for day_offset in range(holiday_duration):
+                    current_date = holiday_start + timedelta(days=day_offset)
+                    if self.start_date <= current_date <= self.end_date:
+                        progress = day_offset / holiday_duration
+                        intensity = np.exp(-((progress - 0.3) ** 2) / 0.1)
+                        existing = outbreak_mults.get(current_date, 1.0)
+                        outbreak_mults[current_date] = existing * (1.0 + (holiday_multiplier - 1.0) * intensity)
+            
+            current_year += 1
+        
+        print(f"      {len(outbreak_mults)} dias com eventos de surto")
+        return outbreak_mults
+
     def _simulate_daily_operations(self) -> None:
         print("   [SIMULATION] Simulando operacoes diarias (consumo, movimentos, pedidos)...")
 
         # Pre-compute seasonal factors
         seasonal_factors = self._compute_seasonal_factors()
+        
+        # Generate outbreak events (flu seasons, etc.)
+        outbreak_events = self._generate_outbreak_events()
 
         # Track current stock per product per warehouse
         current_stock = {p.id: {w.id: 0 for w in self.warehouses} for p in self.products}
@@ -404,6 +504,11 @@ class SyntheticDataGenerator:
         n_products = len(self.products)
         n_days = len(self.date_range)
         n_depts = len(dept_configs)
+        
+        # Department variability factors for realistic consumption patterns
+        dept_variability = np.array([d.get("variability_factor", 1.0) for d in dept_configs])
+        dept_weekend_mult = np.array([d.get("weekend_multiplier", 1.0) for d in dept_configs])
+        dept_holiday_mult = np.array([d.get("holiday_multiplier", 1.0) for d in dept_configs])
 
         # Pre-build per-product arrays for vectorized operations
         base_demands = np.array([p.metadata["base_demand_per_day"] for p in self.products])
@@ -412,6 +517,13 @@ class SyntheticDataGenerator:
         dept_ids = [d["id"] for d in dept_configs]
         dept_weights = np.array([d["weight"] for d in dept_configs])
         dept_mults = np.array([d["consumption_multiplier"] for d in dept_configs])
+        
+        # Pareto demand weights for realistic consumption distribution
+        pareto_weights = np.array([self._product_demand_weights.get(p.id, 1.0) for p in self.products])
+        # Scale Pareto weights: use geometric mean to moderate the effect
+        # This creates heterogeneity without extreme skew
+        geometric_mean = np.exp(np.mean(np.log(pareto_weights + 1e-10)))
+        pareto_scaled = pareto_weights / geometric_mean  # Center around 1.0
 
         # Pre-compute seasonal multiplier array: (n_days, n_atc_classes)
         atc_keys = list(self.config["products"]["class_base_demand_per_100_beds"].keys()) + ["OTHER"]
@@ -423,6 +535,10 @@ class SyntheticDataGenerator:
             for atc, val in sm.items():
                 if atc in atc_index:
                     seasonal_mults[day_idx, atc_index[atc]] = val
+            
+            # Apply outbreak multiplier (affects all product classes)
+            outbreak_mult = outbreak_events.get(current_date, 1.0)
+            seasonal_mults[day_idx, :] *= outbreak_mult
 
         # Map each product to its ATC seasonal column index
         product_atc_idx = np.array([atc_index.get(atc, len(atc_keys)-1) for atc in atc_classes])
@@ -441,7 +557,30 @@ class SyntheticDataGenerator:
             for d_idx in range(n_depts):
                 # Expected demand: (batch_days, n_products)
                 seasonal = seasonal_mults[batch_start:batch_end][:, product_atc_idx]  # (batch_days, n_products)
-                expected = base_demands[np.newaxis, :] * dept_weights[d_idx] * dept_mults[d_idx] * seasonal
+                # Apply Pareto weights for realistic demand heterogeneity
+                expected = base_demands[np.newaxis, :] * dept_weights[d_idx] * dept_mults[d_idx] * seasonal * pareto_scaled[np.newaxis, :]
+                
+                # Apply department variability factor
+                expected *= dept_variability[d_idx]
+                
+                # Apply weekend/holiday multipliers for specific departments
+                for day_offset in range(batch_days):
+                    day_idx = batch_start + day_offset
+                    sim_date_val = self.date_range[int(day_idx)]
+                    current_date = sim_date_val.date() if hasattr(sim_date_val, 'date') else sim_date_val
+                    
+                    # Weekend effect (ER department)
+                    if current_date.weekday() >= 5:  # Saturday or Sunday
+                        expected[day_offset, :] *= dept_weekend_mult[d_idx]
+                    
+                    # Holiday effect (ER department)
+                    is_holiday = any(
+                        (current_date - date.fromisoformat(h["dates"][0])).days == 0
+                        for h in self.config["seasonality"]["holidays_br"]
+                        if h["dates"]
+                    )
+                    if is_holiday:
+                        expected[day_offset, :] *= dept_holiday_mult[d_idx]
 
                 # Zero inflation mask
                 zero_mask = self.rng.random((batch_days, n_products)) < zero_inflation
@@ -547,22 +686,31 @@ class SyntheticDataGenerator:
                     for atc in multipliers:
                         multipliers[atc] *= (1 + effect)
 
-        # Class-specific seasonality
+        # Class-specific seasonality (enhanced with monthly multipliers)
         class_seasonality = self.config["seasonality"].get("class_seasonality", {})
         month = current_date.month
+        
+        # Month name to number mapping for YAML config
+        month_map = {
+            "january": 1, "february": 2, "march": 3, "april": 4,
+            "may": 5, "june": 6, "july": 7, "august": 8,
+            "september": 9, "october": 10, "november": 11, "december": 12
+        }
 
         for atc, patterns in class_seasonality.items():
             if atc in multipliers:
+                # Apply winter/summer multipliers
                 if "winter_multiplier" in patterns and month in [6, 7, 8]:
                     multipliers[atc] *= patterns["winter_multiplier"]
                 if "summer_multiplier" in patterns and month in [12, 1, 2]:
                     multipliers[atc] *= patterns["summer_multiplier"]
-                if "november_multiplier" in patterns and month == 11:
-                    multipliers[atc] *= patterns["november_multiplier"]
-                if "december_multiplier" in patterns and month == 12:
-                    multipliers[atc] *= patterns["december_multiplier"]
-                if "january_multiplier" in patterns and month == 1:
-                    multipliers[atc] *= patterns["january_multiplier"]
+                
+                # Apply specific month multipliers (overrides seasonal)
+                for key, value in patterns.items():
+                    if key.endswith("_multiplier") and key not in ["winter_multiplier", "summer_multiplier"]:
+                        month_name = key.replace("_multiplier", "")
+                        if month_name in month_map and month_map[month_name] == month:
+                            multipliers[atc] *= value
 
         return multipliers
 

@@ -3,6 +3,7 @@
 import urllib.request
 import urllib.error
 import json as _json
+from datetime import date
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical, ScrollableContainer
 from textual.widgets import Header, Footer, Static, DataTable, Label, Button, Sparkline, Input, Rule
@@ -13,8 +14,25 @@ API_URL = "http://localhost:8000/api/v1"
 _token = None
 
 
+def _try_refresh_token():
+    global _token
+    do_login()
+
+
+def _make_request(url, method="GET", data=None, content_type=None):
+    global _token
+    headers = {"Authorization": f"Bearer {_token}"}
+    if content_type:
+        headers["Content-Type"] = content_type
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        return _json.loads(resp.read())
+
+
 def api_get(path, params=None):
     global _token
+    if not _token:
+        _try_refresh_token()
     if not _token:
         return None
     try:
@@ -22,11 +40,49 @@ def api_get(path, params=None):
         if params:
             qs = "&".join(f"{k}={v}" for k, v in params.items() if v is not None)
             url = f"{url}?{qs}"
-        req = urllib.request.Request(url, headers={"Authorization": f"Bearer {_token}"})
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            return _json.loads(resp.read())
+        return _make_request(url)
+    except urllib.error.HTTPError as e:
+        if e.code == 401:
+            _try_refresh_token()
+            if _token:
+                try:
+                    return _make_request(url)
+                except Exception:
+                    pass
+        return None
     except Exception:
         return None
+
+
+def api_post(path, data):
+    global _token
+    if not _token:
+        _try_refresh_token()
+    if not _token:
+        return None, "Nao autenticado"
+    try:
+        url = f"{API_URL}{path}"
+        body = _json.dumps(data).encode("utf-8")
+        return _make_request(url, method="POST", data=body, content_type="application/json"), None
+    except urllib.error.HTTPError as e:
+        if e.code == 401:
+            _try_refresh_token()
+            if _token:
+                try:
+                    return _make_request(url, method="POST", data=body, content_type="application/json"), None
+                except urllib.error.HTTPError as e2:
+                    try:
+                        return None, _json.loads(e2.read()).get("detail", str(e2))
+                    except Exception:
+                        return None, str(e2)
+        try:
+            err_body = _json.loads(e.read())
+            msg = err_body.get("detail", str(e))
+        except Exception:
+            msg = str(e)
+        return None, msg
+    except Exception as e:
+        return None, str(e)
 
 
 def do_login():
@@ -69,7 +125,33 @@ def _mini_bar(value, max_val, width=12):
     return "[green]" + "\u2588" * filled + "[/]" + "[dim]" + "\u2591" * (width - filled) + "[/]"
 
 
-# --------------- Views ---------------
+def _get_warehouses():
+    try:
+        import psycopg2
+        conn = psycopg2.connect("postgresql://pharmapredict:pharmapredict_dev@localhost:5432/pharmapredict")
+        cur = conn.cursor()
+        cur.execute("SELECT id, name, location FROM warehouses ORDER BY name")
+        rows = [{"id": str(r[0]), "name": r[1], "location": r[2] or ""} for r in cur.fetchall()]
+        conn.close()
+        return rows
+    except Exception:
+        return []
+
+
+def _resolve_product(search_term):
+    d = api_get("/products", params={"search": search_term, "size": 5})
+    items = _get_items(d)
+    if items:
+        return items[0]
+    return None
+
+
+def _get_available_batches():
+    d = api_get("/inventory/batches", params={"status": "available", "limit": 50})
+    return _get_items(d)
+
+
+# --------------- Views (Read-Only) ---------------
 
 
 class DashboardView(Static):
@@ -679,6 +761,658 @@ class UsuariosView(Static):
             pass
 
 
+# --------------- Form Views (Write) ---------------
+
+
+CATEGORIES = ["antibiotic", "analgesic", "antithrombotic", "beta_blocker", "ppi", "bronchodilator", "psycholeptic", "ace_inhibitor", "corticosteroid", "other"]
+CATEGORY_LABELS = {
+    "antibiotic": "Antibiotico", "analgesic": "Analgesico", "antithrombotic": "Antitrombotico",
+    "beta_blocker": "Beta-bloqueador", "ppi": "IBP", "bronchodilator": "Broncodilatador",
+    "psycholeptic": "Psicolptico", "ace_inhibitor": "IECA", "corticosteroid": "Corticosteroide",
+    "other": "Outro",
+}
+DEPARTMENTS = [("icu", "UTI"), ("er", "Pronto Socorro"), ("ward", "Enfermaria"), ("outpatient", "Ambulatorio")]
+PRESCRIPTION_TYPES = [("routine", "Rotina"), ("emergency", "Emergencia"), ("prophylactic", "Profilaxia")]
+
+
+class CadastrarProdutoView(Static):
+    _selected_category = "other"
+    _selected_controlled = False
+
+    def compose(self) -> ComposeResult:
+        yield Label("  Cadastrar Novo Produto", classes="view-title")
+        with ScrollableContainer(classes="form-scroll"):
+            with Horizontal(classes="form-row"):
+                yield Label("SKU:", classes="form-label")
+                yield Input(placeholder="Ex: AMOX-500", id="f-sku", classes="form-input")
+            with Horizontal(classes="form-row"):
+                yield Label("Nome:", classes="form-label")
+                yield Input(placeholder="Ex: Amoxicilina 500mg", id="f-name", classes="form-input")
+            with Horizontal(classes="form-row"):
+                yield Label("Generico:", classes="form-label")
+                yield Input(placeholder="Ex: Amoxicilina", id="f-generic", classes="form-input")
+            with Horizontal(classes="form-row"):
+                yield Label("Categoria:", classes="form-label")
+                with Horizontal(id="cat-buttons"):
+                    for cat in CATEGORIES:
+                        active = " -active" if cat == "other" else ""
+                        yield Button(CATEGORY_LABELS[cat], id=f"cat-{cat}", classes=f"filter-btn form-btn{active}")
+            with Horizontal(classes="form-row"):
+                yield Label("ATC Code:", classes="form-label")
+                yield Input(placeholder="Ex: J01CA04", id="f-atc", classes="form-input")
+            with Horizontal(classes="form-row"):
+                yield Label("Unidade:", classes="form-label")
+                yield Input(placeholder="un", id="f-unit", classes="form-input", value="un")
+            with Horizontal(classes="form-row"):
+                yield Label("Custo Unit.:", classes="form-label")
+                yield Input(placeholder="0.00", id="f-cost", classes="form-input", value="0.00")
+            with Horizontal(classes="form-row"):
+                yield Label("Est. Minimo:", classes="form-label")
+                yield Input(placeholder="0", id="f-min", classes="form-input", value="0")
+            with Horizontal(classes="form-row"):
+                yield Label("Est. Maximo:", classes="form-label")
+                yield Input(placeholder="100", id="f-max", classes="form-input", value="100")
+            with Horizontal(classes="form-row"):
+                yield Label("Lead Time:", classes="form-label")
+                yield Input(placeholder="7", id="f-lead", classes="form-input", value="7")
+            with Horizontal(classes="form-row"):
+                yield Label("Controlada:", classes="form-label")
+                with Horizontal(id="ctrl-buttons"):
+                    yield Button("Nao", id="ctrl-no", classes="filter-btn form-btn -active")
+                    yield Button("Sim", id="ctrl-yes", classes="filter-btn form-btn")
+            yield Label("")
+            with Horizontal(classes="form-actions"):
+                yield Button("Confirmar", id="btn-confirm", classes="form-btn-confirm")
+                yield Button("Limpar", id="btn-clear", classes="form-btn-clear")
+            yield Label("", id="form-status")
+
+    def _collect_data(self):
+        sku = self.query_one("#f-sku", Input).value.strip()
+        name = self.query_one("#f-name", Input).value.strip()
+        if not sku or not name:
+            return None, "SKU e Nome sao obrigatorios"
+        generic = self.query_one("#f-generic", Input).value.strip() or None
+        atc = self.query_one("#f-atc", Input).value.strip() or None
+        unit = self.query_one("#f-unit", Input).value.strip() or "un"
+        try:
+            cost = float(self.query_one("#f-cost", Input).value.strip() or "0")
+        except ValueError:
+            return None, "Custo invalido"
+        try:
+            min_s = int(self.query_one("#f-min", Input).value.strip() or "0")
+            max_s = int(self.query_one("#f-max", Input).value.strip() or "100")
+            lead = int(self.query_one("#f-lead", Input).value.strip() or "7")
+        except ValueError:
+            return None, "Valores numericos invalidos"
+        data = {
+            "sku": sku,
+            "name": name,
+            "category": self._selected_category,
+            "unit": unit,
+            "unit_cost": cost,
+            "min_stock_level": min_s,
+            "max_stock_level": max_s,
+            "lead_time_days": lead,
+            "controlled_substance": self._selected_controlled,
+        }
+        if generic:
+            data["generic_name"] = generic
+        if atc:
+            data["atc_code"] = atc
+        return data, None
+
+    def _clear_form(self):
+        for inp_id in ["f-sku", "f-name", "f-generic", "f-atc", "f-cost", "f-min", "f-max", "f-lead"]:
+            self.query_one(f"#{inp_id}", Input).value = ""
+        self.query_one("#f-unit", Input).value = "un"
+        self.query_one("#f-cost", Input).value = "0.00"
+        self.query_one("#f-min", Input).value = "0"
+        self.query_one("#f-max", Input).value = "100"
+        self.query_one("#f-lead", Input).value = "7"
+        self._selected_category = "other"
+        self._selected_controlled = False
+        for btn in self.query("#cat-buttons .filter-btn"):
+            btn.classes = "filter-btn form-btn -active" if btn.id == "cat-other" else "filter-btn form-btn"
+        self.query_one("#ctrl-no", Button).classes = "filter-btn form-btn -active"
+        self.query_one("#ctrl-yes", Button).classes = "filter-btn form-btn"
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        btn_id = event.button.id
+        if btn_id.startswith("cat-"):
+            cat = btn_id.replace("cat-", "")
+            self._selected_category = cat
+            for btn in self.query("#cat-buttons .filter-btn"):
+                btn.classes = "filter-btn form-btn -active" if btn.id == btn_id else "filter-btn form-btn"
+        elif btn_id == "ctrl-no":
+            self._selected_controlled = False
+            self.query_one("#ctrl-no").classes = "filter-btn form-btn -active"
+            self.query_one("#ctrl-yes").classes = "filter-btn form-btn"
+        elif btn_id == "ctrl-yes":
+            self._selected_controlled = True
+            self.query_one("#ctrl-yes").classes = "filter-btn form-btn -active"
+            self.query_one("#ctrl-no").classes = "filter-btn form-btn"
+        elif btn_id == "btn-confirm":
+            data, err = self._collect_data()
+            if err:
+                self.query_one("#form-status", Label).update(f"  [red]{err}[/]")
+                return
+            result, api_err = api_post("/products", data)
+            if api_err:
+                self.query_one("#form-status", Label).update(f"  [red]Erro: {api_err}[/]")
+            else:
+                self._clear_form()
+                self.query_one("#form-status", Label).update(f"  [green]Produto criado: {result.get('name', '')} (SKU: {result.get('sku', '')})[/]")
+        elif btn_id == "btn-clear":
+            self._clear_form()
+            self.query_one("#form-status", Label).update("")
+
+
+class RecebimentoView(Static):
+    _warehouses = []
+    _selected_warehouse = None
+
+    def compose(self) -> ComposeResult:
+        yield Label("  Recebimento de Lote", classes="view-title")
+        with ScrollableContainer(classes="form-scroll"):
+            yield Label("[dim]  Produtos cadastrados (use SKU ou nome para buscar):[/]", classes="form-ref-title")
+            yield DataTable(id="ref-products", classes="form-ref-table")
+            yield Label("")
+            with Horizontal(classes="form-row"):
+                yield Label("Produto:", classes="form-label")
+                yield Input(placeholder="SKU ou nome do produto", id="f-product", classes="form-input")
+            with Horizontal(classes="form-row"):
+                yield Label("Deposito:", classes="form-label")
+                with Horizontal(id="wh-buttons"):
+                    yield Label("[dim]Carregando depositos...[/]", id="wh-loading")
+            with Horizontal(classes="form-row"):
+                yield Label("Lote:", classes="form-label")
+                yield Input(placeholder="Numero do lote", id="f-batch", classes="form-input")
+            with Horizontal(classes="form-row"):
+                yield Label("Quantidade:", classes="form-label")
+                yield Input(placeholder="0", id="f-qty", classes="form-input", value="0")
+            with Horizontal(classes="form-row"):
+                yield Label("Validade:", classes="form-label")
+                yield Input(placeholder="AAAA-MM-DD", id="f-expiry", classes="form-input")
+            with Horizontal(classes="form-row"):
+                yield Label("Fabricacao:", classes="form-label")
+                yield Input(placeholder="AAAA-MM-DD (opcional)", id="f-mfg", classes="form-input")
+            with Horizontal(classes="form-row"):
+                yield Label("Custo Unit.:", classes="form-label")
+                yield Input(placeholder="0.00", id="f-cost", classes="form-input", value="0.00")
+            yield Label("")
+            with Horizontal(classes="form-actions"):
+                yield Button("Confirmar", id="btn-confirm", classes="form-btn-confirm")
+                yield Button("Limpar", id="btn-clear", classes="form-btn-clear")
+            yield Label("", id="form-status")
+
+    def on_mount(self) -> None:
+        self._warehouses = _get_warehouses()
+        try:
+            self.query_one("#wh-loading", Label).update("")
+            wh_box = self.query_one("#wh-buttons")
+            for wh in self._warehouses:
+                label = wh["name"]
+                if wh.get("location"):
+                    label += f" ({wh['location']})"
+                btn = Button(label, id=f"wh-{wh['id'][:8]}", classes="filter-btn form-btn")
+                wh_box.mount(btn)
+            if self._warehouses:
+                self._selected_warehouse = self._warehouses[0]["id"]
+                first_btn = self.query_one(f"#wh-{self._warehouses[0]['id'][:8]}", Button)
+                first_btn.classes = "filter-btn form-btn -active"
+        except Exception:
+            pass
+        self._load_products()
+
+    def _load_products(self):
+        try:
+            t = self.query_one("#ref-products", DataTable)
+            t.add_columns("Produto", "SKU", "Categoria")
+            d = api_get("/products", params={"size": 20})
+            items = _get_items(d)
+            for item in items:
+                t.add_row(item.get("name", ""), item.get("sku", ""), item.get("category", ""))
+        except Exception:
+            pass
+
+    def _collect_data(self):
+        product_search = self.query_one("#f-product", Input).value.strip()
+        if not product_search:
+            return None, "Produto e obrigatorio"
+        product = _resolve_product(product_search)
+        if not product:
+            return None, f"Produto nao encontrado: {product_search}"
+        batch_num = self.query_one("#f-batch", Input).value.strip()
+        if not batch_num:
+            return None, "Numero do lote e obrigatorio"
+        if not self._selected_warehouse:
+            return None, "Selecione um deposito"
+        try:
+            qty = int(self.query_one("#f-qty", Input).value.strip() or "0")
+        except ValueError:
+            return None, "Quantidade invalida"
+        expiry_str = self.query_one("#f-expiry", Input).value.strip()
+        if not expiry_str:
+            return None, "Data de validade e obrigatoria"
+        try:
+            parts = expiry_str.split("-")
+            expiry = date(int(parts[0]), int(parts[1]), int(parts[2]))
+        except Exception:
+            return None, "Formato de data invalido (use AAAA-MM-DD)"
+        mfg_str = self.query_one("#f-mfg", Input).value.strip()
+        mfg = None
+        if mfg_str:
+            try:
+                parts = mfg_str.split("-")
+                mfg = date(int(parts[0]), int(parts[1]), int(parts[2]))
+            except Exception:
+                return None, "Formato de data de fabricacao invalido"
+        try:
+            cost = float(self.query_one("#f-cost", Input).value.strip() or "0")
+        except ValueError:
+            return None, "Custo invalido"
+        data = {
+            "product_id": product["id"],
+            "warehouse_id": self._selected_warehouse,
+            "batch_number": batch_num,
+            "quantity": qty,
+            "expiry_date": expiry.isoformat(),
+            "unit_cost": cost,
+        }
+        if mfg:
+            data["manufacture_date"] = mfg.isoformat()
+        return data, None
+
+    def _clear_form(self):
+        for inp_id in ["f-product", "f-batch", "f-expiry", "f-mfg"]:
+            self.query_one(f"#{inp_id}", Input).value = ""
+        self.query_one("#f-qty", Input).value = "0"
+        self.query_one("#f-cost", Input).value = "0.00"
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        btn_id = event.button.id
+        if btn_id.startswith("wh-"):
+            wh_prefix = btn_id.replace("wh-", "")
+            for wh in self._warehouses:
+                if wh["id"][:8] == wh_prefix:
+                    self._selected_warehouse = wh["id"]
+                    break
+            for btn in self.query("#wh-buttons .filter-btn"):
+                btn.classes = "filter-btn form-btn -active" if btn.id == btn_id else "filter-btn form-btn"
+        elif btn_id == "btn-confirm":
+            data, err = self._collect_data()
+            if err:
+                self.query_one("#form-status", Label).update(f"  [red]{err}[/]")
+                return
+            result, api_err = api_post("/inventory/batches", data)
+            if api_err:
+                self.query_one("#form-status", Label).update(f"  [red]Erro: {api_err}[/]")
+            else:
+                self._clear_form()
+                self.query_one("#form-status", Label).update(
+                    f"  [green]Lote criado: {result.get('batch_number', '')} | Qtd: {result.get('quantity', 0)}[/]"
+                )
+        elif btn_id == "btn-clear":
+            self._clear_form()
+            self.query_one("#form-status", Label).update("")
+
+
+class DispensacaoView(Static):
+    _batches = []
+
+    def compose(self) -> ComposeResult:
+        yield Label("  Dispensacao de Estoque (Saida)", classes="view-title")
+        with ScrollableContainer(classes="form-scroll"):
+            yield Label("[dim]  Lotes disponiveis (copie o ID do lote):[/]", classes="form-ref-title")
+            yield DataTable(id="ref-batches", classes="form-ref-table")
+            yield Label("")
+            with Horizontal(classes="form-row"):
+                yield Label("ID Lote:", classes="form-label")
+                yield Input(placeholder="UUID do lote", id="f-batch-id", classes="form-input")
+            with Horizontal(classes="form-row"):
+                yield Label("Quantidade:", classes="form-label")
+                yield Input(placeholder="Quantidade a dispensar", id="f-qty", classes="form-input", value="0")
+            with Horizontal(classes="form-row"):
+                yield Label("Notas:", classes="form-label")
+                yield Input(placeholder="Observacoes (opcional)", id="f-notes", classes="form-input")
+            yield Label("")
+            with Horizontal(classes="form-actions"):
+                yield Button("Confirmar Saida", id="btn-confirm", classes="form-btn-confirm")
+                yield Button("Limpar", id="btn-clear", classes="form-btn-clear")
+            yield Label("", id="form-status")
+
+    def on_mount(self) -> None:
+        self._load_batches()
+
+    def _load_batches(self):
+        try:
+            self._batches = _get_available_batches()
+            t = self.query_one("#ref-batches", DataTable)
+            t.add_columns("ID (8chars)", "Produto", "Lote", "Qtd", "Validade")
+            for b in self._batches:
+                t.add_row(
+                    str(b.get("id", ""))[:8],
+                    b.get("product_id", "")[:8],
+                    b.get("batch_number", ""),
+                    str(b.get("quantity", 0)),
+                    b.get("expiry_date", ""),
+                )
+        except Exception:
+            pass
+
+    def _collect_data(self):
+        batch_id = self.query_one("#f-batch-id", Input).value.strip()
+        if not batch_id:
+            return None, "ID do lote e obrigatorio"
+        if len(batch_id) < 36:
+            found = None
+            for b in self._batches:
+                if str(b.get("id", "")).startswith(batch_id):
+                    found = b
+                    break
+            if found:
+                batch_id = found["id"]
+            else:
+                return None, f"Lote nao encontrado: {batch_id}"
+        try:
+            qty = int(self.query_one("#f-qty", Input).value.strip() or "0")
+        except ValueError:
+            return None, "Quantidade invalida"
+        if qty <= 0:
+            return None, "Quantidade deve ser maior que 0"
+        notes = self.query_one("#f-notes", Input).value.strip() or None
+        data = {
+            "batch_id": batch_id,
+            "quantity_change": -qty,
+            "movement_type": "out",
+        }
+        if notes:
+            data["notes"] = notes
+        return data, None
+
+    def _clear_form(self):
+        for inp_id in ["f-batch-id", "f-qty", "f-notes"]:
+            self.query_one(f"#{inp_id}", Input).value = ""
+        self.query_one("#f-qty", Input).value = "0"
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        btn_id = event.button.id
+        if btn_id == "btn-confirm":
+            data, err = self._collect_data()
+            if err:
+                self.query_one("#form-status", Label).update(f"  [red]{err}[/]")
+                return
+            result, api_err = api_post("/inventory/movements", data)
+            if api_err:
+                self.query_one("#form-status", Label).update(f"  [red]Erro: {api_err}[/]")
+            else:
+                qty = result.get("quantity_change", 0)
+                self._clear_form()
+                self._load_batches()
+                self.query_one("#form-status", Label).update(
+                    f"  [green]Saida registrada: {abs(qty)} unidades | Tipo: {result.get('movement_type', '')}[/]"
+                )
+        elif btn_id == "btn-clear":
+            self._clear_form()
+            self.query_one("#form-status", Label).update("")
+
+
+class RegistroConsumoView(Static):
+    _selected_department = "outpatient"
+    _selected_prescription = "routine"
+
+    def compose(self) -> ComposeResult:
+        yield Label("  Registro de Consumo Diario", classes="view-title")
+        with ScrollableContainer(classes="form-scroll"):
+            yield Label("[dim]  Produtos cadastrados (use SKU ou nome para buscar):[/]", classes="form-ref-title")
+            yield DataTable(id="ref-products", classes="form-ref-table")
+            yield Label("")
+            with Horizontal(classes="form-row"):
+                yield Label("Produto:", classes="form-label")
+                yield Input(placeholder="SKU ou nome do produto", id="f-product", classes="form-input")
+            with Horizontal(classes="form-row"):
+                yield Label("Data:", classes="form-label")
+                yield Input(placeholder="AAAA-MM-DD", id="f-date", classes="form-input", value=date.today().isoformat())
+            with Horizontal(classes="form-row"):
+                yield Label("Quantidade:", classes="form-label")
+                yield Input(placeholder="0", id="f-qty", classes="form-input", value="0")
+            with Horizontal(classes="form-row"):
+                yield Label("Departamento:", classes="form-label")
+                with Horizontal(id="dept-buttons"):
+                    for dept_val, dept_label in DEPARTMENTS:
+                        active = " -active" if dept_val == "outpatient" else ""
+                        yield Button(dept_label, id=f"dept-{dept_val}", classes=f"filter-btn form-btn{active}")
+            with Horizontal(classes="form-row"):
+                yield Label("Prescricao:", classes="form-label")
+                yield Label("[dim]Prescricao:[/]", classes="form-label-dummy")
+            with Horizontal(classes="form-row"):
+                yield Label("", classes="form-label")
+                with Horizontal(id="presc-buttons"):
+                    for ptype, plabel in PRESCRIPTION_TYPES:
+                        active = " -active" if ptype == "routine" else ""
+                        yield Button(plabel, id=f"presc-{ptype}", classes=f"filter-btn form-btn{active}")
+            yield Label("")
+            with Horizontal(classes="form-actions"):
+                yield Button("Confirmar", id="btn-confirm", classes="form-btn-confirm")
+                yield Button("Limpar", id="btn-clear", classes="form-btn-clear")
+            yield Label("", id="form-status")
+
+    def on_mount(self) -> None:
+        self._load_products()
+
+    def _load_products(self):
+        try:
+            t = self.query_one("#ref-products", DataTable)
+            t.add_columns("Produto", "SKU", "Categoria")
+            d = api_get("/products", params={"size": 20})
+            items = _get_items(d)
+            for item in items:
+                t.add_row(item.get("name", ""), item.get("sku", ""), item.get("category", ""))
+        except Exception:
+            pass
+
+    def _collect_data(self):
+        product_search = self.query_one("#f-product", Input).value.strip()
+        if not product_search:
+            return None, "Produto e obrigatorio"
+        product = _resolve_product(product_search)
+        if not product:
+            return None, f"Produto nao encontrado: {product_search}"
+        date_str = self.query_one("#f-date", Input).value.strip()
+        if not date_str:
+            return None, "Data e obrigatoria"
+        try:
+            parts = date_str.split("-")
+            cons_date = date(int(parts[0]), int(parts[1]), int(parts[2]))
+        except Exception:
+            return None, "Formato de data invalido (use AAAA-MM-DD)"
+        try:
+            qty = int(self.query_one("#f-qty", Input).value.strip() or "0")
+        except ValueError:
+            return None, "Quantidade invalida"
+        if qty <= 0:
+            return None, "Quantidade deve ser maior que 0"
+        data = {
+            "product_id": product["id"],
+            "consumption_date": cons_date.isoformat(),
+            "quantity": qty,
+            "department": self._selected_department,
+            "prescription_type": self._selected_prescription,
+        }
+        return data, None
+
+    def _clear_form(self):
+        for inp_id in ["f-product", "f-qty"]:
+            self.query_one(f"#{inp_id}", Input).value = ""
+        self.query_one("#f-date", Input).value = date.today().isoformat()
+        self.query_one("#f-qty", Input).value = "0"
+        self._selected_department = "outpatient"
+        self._selected_prescription = "routine"
+        for btn in self.query("#dept-buttons .filter-btn"):
+            btn.classes = "filter-btn form-btn -active" if btn.id == "dept-outpatient" else "filter-btn form-btn"
+        for btn in self.query("#presc-buttons .filter-btn"):
+            btn.classes = "filter-btn form-btn -active" if btn.id == "presc-routine" else "filter-btn form-btn"
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        btn_id = event.button.id
+        if btn_id.startswith("dept-"):
+            dept = btn_id.replace("dept-", "")
+            self._selected_department = dept
+            for btn in self.query("#dept-buttons .filter-btn"):
+                btn.classes = "filter-btn form-btn -active" if btn.id == btn_id else "filter-btn form-btn"
+        elif btn_id.startswith("presc-"):
+            ptype = btn_id.replace("presc-", "")
+            self._selected_prescription = ptype
+            for btn in self.query("#presc-buttons .filter-btn"):
+                btn.classes = "filter-btn form-btn -active" if btn.id == btn_id else "filter-btn form-btn"
+        elif btn_id == "btn-confirm":
+            data, err = self._collect_data()
+            if err:
+                self.query_one("#form-status", Label).update(f"  [red]{err}[/]")
+                return
+            result, api_err = api_post("/consumption", data)
+            if api_err:
+                self.query_one("#form-status", Label).update(f"  [red]Erro: {api_err}[/]")
+            else:
+                self._clear_form()
+                self.query_one("#form-status", Label).update(
+                    f"  [green]Consumo registrado: {result.get('quantity', 0)} unidades em {result.get('department', '')}[/]"
+                )
+        elif btn_id == "btn-clear":
+            self._clear_form()
+            self.query_one("#form-status", Label).update("")
+
+
+class PrevisoesView(Static):
+    """View de Previsoes ML - Mostra previsoes de demanda do modelo treinado."""
+    _all_data = []
+    _selected_idx = None
+
+    def compose(self) -> ComposeResult:
+        yield Label("  Previsoes de Demanda (ML)", classes="view-title")
+        with Horizontal(id="pred-filters"):
+            yield Input(placeholder="Buscar produto...", id="pred-search", classes="filter-input")
+            yield Button("Atualizar", id="pred-refresh", classes="filter-btn")
+        yield DataTable(id="tbl")
+        yield Label("[dim]  Clique em uma linha para ver detalhes[/]", id="hint")
+        yield Label("", id="detail")
+
+    def on_mount(self) -> None:
+        self._load_data()
+
+    def _load_data(self):
+        try:
+            import psycopg2
+            conn = psycopg2.connect("postgresql://pharmapredict:pharmapredict_dev@localhost:5432/pharmapredict")
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT p.id, p.sku, p.name, p.category, p.atc_code,
+                       pr.predicted_quantity, pr.confidence_lower, pr.confidence_upper,
+                       pr.mape_score, pr.forecast_date,
+                       COALESCE(inv.stock, 0) as current_stock
+                FROM predictions pr
+                JOIN products p ON pr.product_id = p.id
+                LEFT JOIN (
+                    SELECT product_id, SUM(quantity) as stock
+                    FROM inventory_batches
+                    WHERE status = 'available'
+                    GROUP BY product_id
+                ) inv ON p.id = inv.product_id
+                WHERE p.is_active = true
+                ORDER BY pr.predicted_quantity DESC
+            """)
+            rows = cur.fetchall()
+            conn.close()
+
+            self.__class__._all_data = []
+            for row in rows:
+                stock = row[10] or 0
+                pred_7d = row[5] or 0
+                days_stock = int(stock / (pred_7d / 7)) if pred_7d > 0 and stock > 0 else None
+
+                self.__class__._all_data.append({
+                    "product_id": row[0],
+                    "sku": row[1],
+                    "name": row[2],
+                    "category": row[3],
+                    "atc_code": row[4],
+                    "predicted_7d": pred_7d,
+                    "predicted_daily": round(pred_7d / 7, 1) if pred_7d else 0,
+                    "confidence_lower": row[6],
+                    "confidence_upper": row[7],
+                    "mape": row[8],
+                    "forecast_date": str(row[9]) if row[9] else "-",
+                    "current_stock": stock,
+                    "days_of_stock": days_stock,
+                })
+
+            self._render_table(self._all_data)
+        except Exception as e:
+            self.query_one("#detail", Label).update(f"  [red]Erro ao carregar previsoes: {e}[/]")
+
+    def _render_table(self, data):
+        try:
+            t = self.query_one("#tbl", DataTable)
+            t.clear()
+            if not data:
+                self.query_one("#detail", Label).update("  [dim]Nenhuma previsao encontrada. Execute ml/predict.py[/]")
+                return
+            t.add_columns("#", "Produto", "Categoria", "Estoque", "Prev Diaria", "Prev 7d", "Dias Estoque", "MAPE")
+            for i, item in enumerate(data[:100], 1):
+                stock_str = f"{item['current_stock']:,}" if item['current_stock'] else "0"
+                days_str = str(item['days_of_stock']) if item['days_of_stock'] is not None else "-"
+                mape_str = f"{item['mape']*100:.1f}%" if item['mape'] else "-"
+                t.add_row(
+                    str(i),
+                    item["name"][:35],
+                    item["category"][:12],
+                    stock_str,
+                    f"{item['predicted_daily']:,.0f}",
+                    f"{item['predicted_7d']:,}",
+                    days_str,
+                    mape_str,
+                )
+            self.query_one("#detail", Label).update(
+                f"  [dim]Total: {len(data)} produtos com previsao | "
+                f"Media prev 7d: {sum(d['predicted_7d'] for d in data) / len(data):,.0f}[/]"
+            )
+        except Exception:
+            pass
+
+    @on(Input.Changed, "#pred-search")
+    def on_search(self):
+        search = self.query_one("#pred-search", Input).value.lower().strip()
+        if not search:
+            filtered = self._all_data
+        else:
+            filtered = [x for x in self._all_data
+                       if search in (x.get("name") or "").lower()
+                       or search in (x.get("sku") or "").lower()
+                       or search in (x.get("category") or "").lower()]
+        self._render_table(filtered)
+
+    @on(DataTable.RowSelected, "#tbl")
+    def on_row_selected(self, event: DataTable.RowSelected) -> None:
+        row_idx = event.row_index
+        if row_idx is not None and row_idx < len(self._all_data):
+            item = self._all_data[row_idx]
+            detail = (
+                f"  [bold]{item['name']}[/] ({item['sku']})\n"
+                f"  Categoria: {item['category']} | ATC: {item['atc_code']}\n"
+                f"  Previsao 7d: [bold]{item['predicted_7d']:,}[/] "
+                f"(diaria: {item['predicted_daily']:,.0f})\n"
+                f"  Intervalo confianca: [{item['confidence_lower']:,} - {item['confidence_upper']:,}]\n"
+                f"  Estoque atual: [bold]{item['current_stock']:,}[/] | "
+                f"Dias de estoque: [bold]{item['days_of_stock'] or '-'}[/]\n"
+                f"  MAPE: {item['mape']*100:.1f}% | Data previsao: {item['forecast_date']}"
+            )
+            self.query_one("#detail", Label).update(detail)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "pred-refresh":
+            self._load_data()
+
+
 # --------------- App ---------------
 
 
@@ -691,17 +1425,22 @@ VIEW_MAP = {
     "6": ConsumoView,
     "7": MovimentacoesView,
     "8": UsuariosView,
+    "9": CadastrarProdutoView,
+    "10": RecebimentoView,
+    "11": DispensacaoView,
+    "12": RegistroConsumoView,
+    "13": PrevisoesView,
 }
 
 
 class ABHUApp(App):
-    TITLE = "ABHU"
+    TITLE = "PharmaPredict"
     SUB_TITLE = "clique para navegar"
 
     CSS = """
     Screen { background: $surface; }
     #sidebar {
-        width: 28;
+        width: 30;
         background: $panel;
         border-right: solid $primary;
         padding: 1 0;
@@ -743,15 +1482,54 @@ class ABHUApp(App):
     }
     #hint { color: $text-muted; }
     #summary { width: 100%; }
+
+    .form-scroll { height: 1fr; padding: 0 2; }
+    .form-row { height: auto; margin: 0 0 1 0; align: left middle; }
+    .form-label { width: 14; min-width: 14; text-style: bold; color: $text-muted; }
+    .form-label-dummy { width: 14; min-width: 14; }
+    .form-input { width: 1fr; min-height: 3; margin: 0 0 0 1; }
+    .form-btn {
+        min-height: 3;
+        min-width: 10;
+        margin: 0 1;
+        background: $surface;
+        color: $text-muted;
+        border: solid $primary;
+    }
+    .form-btn:hover { background: $primary 20%; }
+    .form-btn.-active { background: $primary 40%; color: $text; text-style: bold; }
+    .form-actions { height: auto; margin: 1 0; }
+    .form-btn-confirm {
+        min-height: 3;
+        min-width: 16;
+        margin: 0 1;
+        background: $success;
+        color: $text;
+        border: solid $success;
+        text-style: bold;
+    }
+    .form-btn-confirm:hover { background: $success 80%; }
+    .form-btn-clear {
+        min-height: 3;
+        min-width: 12;
+        margin: 0 1;
+        background: $surface;
+        color: $text-muted;
+        border: solid $primary;
+    }
+    .form-btn-clear:hover { background: $primary 20%; }
+    .form-ref-title { color: $text-muted; margin: 0 0 0 2; }
+    .form-ref-table { height: 12; margin: 0 0 1 2; }
     """
 
     def compose(self) -> ComposeResult:
         yield Header()
         with Horizontal():
             with Vertical(id="sidebar"):
-                yield Label("[bold cyan]ABHU[/]")
-                yield Label("[dim]v1.1[/]")
+                yield Label("[bold cyan]PharmaPredict[/]")
+                yield Label("[dim]v2.0[/]")
                 yield Label("")
+                yield Label("[bold]Consulta[/]")
                 yield Button("1 Dashboard", id="btn-1", classes="-active")
                 yield Button("2 Produtos", id="btn-2")
                 yield Button("3 Alertas", id="btn-3")
@@ -760,6 +1538,13 @@ class ABHUApp(App):
                 yield Button("6 Consumo", id="btn-6")
                 yield Button("7 Movimentacoes", id="btn-7")
                 yield Button("8 Usuarios", id="btn-8")
+                yield Button("13 Previsoes ML", id="btn-13")
+                yield Label("")
+                yield Label("[bold]Cadastro[/]")
+                yield Button("9 Cadastrar Produto", id="btn-9")
+                yield Button("10 Recebimento", id="btn-10")
+                yield Button("11 Dispensacao", id="btn-11")
+                yield Button("12 Consumo Diario", id="btn-12")
                 yield Label("")
                 yield Button("q Sair", id="btn-q")
             with Vertical(id="content"):
@@ -771,6 +1556,11 @@ class ABHUApp(App):
                 yield ConsumoView(id="v-6", classes="hidden")
                 yield MovimentacoesView(id="v-7", classes="hidden")
                 yield UsuariosView(id="v-8", classes="hidden")
+                yield CadastrarProdutoView(id="v-9", classes="hidden")
+                yield RecebimentoView(id="v-10", classes="hidden")
+                yield DispensacaoView(id="v-11", classes="hidden")
+                yield RegistroConsumoView(id="v-12", classes="hidden")
+                yield PrevisoesView(id="v-13", classes="hidden")
         yield Footer()
 
     def _show_view(self, key: str):
@@ -783,7 +1573,7 @@ class ABHUApp(App):
             self.query_one(f"#v-{key}").display = True
         except NoMatches:
             pass
-        for k in "12345678":
+        for k in VIEW_MAP:
             try:
                 btn = self.query_one(f"#btn-{k}", Button)
                 btn.classes = "-active" if k == key else ""

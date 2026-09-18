@@ -108,14 +108,88 @@ async def bulk_create_consumption(
     return [ConsumptionResponse.model_validate(c) for c in consumptions]
 
 
-@router.post("/import", summary="Import consumption from CSV/Excel")
+@router.post("/import", summary="Import consumption from CSV")
 async def import_consumption(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
     file: UploadFile = File(...),
 ):
-    # TODO: Implement CSV/Excel parsing
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Import functionality not yet implemented",
-    )
+    import csv
+    import io
+
+    if not file.filename or not file.filename.endswith(".csv"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only CSV files are supported. Upload a .csv file.",
+        )
+
+    content = await file.read()
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError:
+        text = content.decode("latin-1")
+
+    reader = csv.DictReader(io.StringIO(text))
+
+    required_cols = {"product_id", "consumption_date", "quantity", "department"}
+    if not reader.fieldnames or not required_cols.issubset(set(reader.fieldnames)):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"CSV must have columns: {', '.join(sorted(required_cols))}. Found: {reader.fieldnames}",
+        )
+
+    created = []
+    errors = []
+
+    for row_num, row in enumerate(reader, start=2):
+        try:
+            product_id = row["product_id"].strip()
+            quantity = int(row["quantity"].strip())
+            department = row["department"].strip()
+            prescription_type = row.get("prescription_type", "routine").strip()
+            consumption_date = row["consumption_date"].strip()
+
+            if quantity <= 0:
+                errors.append({"row": row_num, "error": "Quantity must be > 0"})
+                continue
+
+            if department not in ("icu", "er", "ward", "outpatient"):
+                errors.append({"row": row_num, "error": f"Invalid department: {department}"})
+                continue
+
+            if prescription_type not in ("routine", "emergency", "prophylactic"):
+                prescription_type = "routine"
+
+            from datetime import date as _date
+            parts = consumption_date.split("-")
+            cons_date = _date(int(parts[0]), int(parts[1]), int(parts[2]))
+
+            from uuid import UUID
+            prod_uuid = UUID(product_id)
+
+            product_result = await db.execute(select(Product).where(Product.id == prod_uuid))
+            if not product_result.scalar_one_or_none():
+                errors.append({"row": row_num, "error": f"Product not found: {product_id}"})
+                continue
+
+            consumption = Consumption(
+                product_id=prod_uuid,
+                consumption_date=cons_date,
+                quantity=quantity,
+                department=department,
+                prescription_type=prescription_type,
+            )
+            db.add(consumption)
+            created.append(row_num)
+
+        except Exception as e:
+            errors.append({"row": row_num, "error": str(e)})
+
+    if created:
+        await db.commit()
+
+    return {
+        "imported": len(created),
+        "errors": len(errors),
+        "error_details": errors[:20],
+    }

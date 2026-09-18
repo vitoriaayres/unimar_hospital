@@ -180,8 +180,8 @@ def main():
             INSERT INTO alerts (id, product_id, alert_type, severity, message,
                 alert_metadata, acknowledged, created_at)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-        """, (row["id"], row["product_id"], fix_enum(row["alert_type"]),
-              fix_enum(row["severity"]), row["message"], row["metadata"],
+        """, (row["id"], row["product_id"],               fix_enum(row["alert_type"]),
+              fix_enum(row["severity"]), row["message"], row.get("metadata"),
               row.get("acknowledged") or False, row.get("created_at") or NOW))
     print(f"  {len(df)} alerts")
 

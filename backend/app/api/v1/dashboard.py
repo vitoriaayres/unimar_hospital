@@ -101,31 +101,51 @@ async def get_stockout_risk(
     current_user: Annotated[User, Depends(get_current_user)],
     limit: int = Query(default=20, ge=1, le=100),
 ) -> list[StockoutRiskItem]:
-    # Simplified stockout risk calculation
-    query = (
+    """Get stockout risk items using ML predictions when available."""
+    from app.models import Prediction
+    
+    # Try to get ML predictions first
+    prediction_query = (
         select(
             Product.id.label("product_id"),
             Product.name.label("product_name"),
             Product.sku.label("product_sku"),
             func.coalesce(func.sum(InventoryBatch.quantity).filter(InventoryBatch.status == BatchStatus.AVAILABLE), 0).label("current_stock"),
-            func.coalesce(func.avg(Consumption.quantity), 40).label("daily_avg"),
+            Prediction.predicted_quantity.label("predicted_7d"),
+            Prediction.confidence_lower,
+            Prediction.confidence_upper,
         )
         .outerjoin(InventoryBatch, and_(Product.id == InventoryBatch.product_id, InventoryBatch.status != BatchStatus.RECALLED))
-        .outerjoin(Consumption, and_(Product.id == Consumption.product_id, Consumption.consumption_date >= func.current_date() - 30))
+        .outerjoin(Prediction, Product.id == Prediction.product_id)
         .where(Product.is_active == True)
-        .group_by(Product.id, Product.name, Product.sku, Product.min_stock_level)
+        .group_by(Product.id, Product.name, Product.sku, Prediction.predicted_quantity, Prediction.confidence_lower, Prediction.confidence_upper)
         .having(func.coalesce(func.sum(InventoryBatch.quantity).filter(InventoryBatch.status == BatchStatus.AVAILABLE), 0) <= Product.max_stock_level)
         .order_by(func.coalesce(func.sum(InventoryBatch.quantity).filter(InventoryBatch.status == BatchStatus.AVAILABLE), 0).asc())
         .limit(limit)
     )
-
-    result = await db.execute(query)
+    
+    result = await db.execute(prediction_query)
     rows = result.all()
-
+    
     items = []
     for row in rows:
         current_stock = row.current_stock
-        daily_avg = float(row.daily_avg) if row.daily_avg else 40.0
+        # Use ML prediction if available, otherwise fall back to simple calculation
+        if row.predicted_7d is not None and row.predicted_7d > 0:
+            predicted_7d = row.predicted_7d
+            daily_avg = predicted_7d / 7
+        else:
+            # Fallback: simple average from recent consumption
+            fallback_query = select(func.avg(Consumption.quantity)).where(
+                and_(
+                    Consumption.product_id == row.product_id,
+                    Consumption.consumption_date >= func.current_date() - 30,
+                )
+            )
+            fallback_result = await db.execute(fallback_query)
+            daily_avg = float(fallback_result.scalar() or 40.0)
+            predicted_7d = int(daily_avg * 7)
+        
         days_until_stockout = int(current_stock / daily_avg) if daily_avg > 0 else None
         
         if days_until_stockout is not None and days_until_stockout <= 3:
@@ -142,11 +162,11 @@ async def get_stockout_risk(
             product_name=row.product_name,
             product_sku=row.product_sku,
             current_stock=row.current_stock,
-            predicted_consumption_7d=int(daily_avg * 7),
-            predicted_consumption_30d=int(daily_avg * 30),
+            predicted_consumption_7d=int(predicted_7d),
+            predicted_consumption_30d=int(predicted_7d * 30 / 7),
             days_until_stockout=days_until_stockout,
             risk_level=risk_level,
-            recommended_order_qty=max(0, 100 - row.current_stock),  # Simplified
+            recommended_order_qty=max(0, int(daily_avg * 14) - row.current_stock),  # 14 days of stock
         ))
 
     return items

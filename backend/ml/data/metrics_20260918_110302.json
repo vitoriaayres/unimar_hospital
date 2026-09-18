@@ -1,0 +1,12 @@
+{
+  "model_type": "lightgbm",
+  "mape": 0.40345,
+  "rmse": 232.7838,
+  "mae": 77.2776,
+  "smape": 0.329337,
+  "n_features": 57,
+  "n_train": 532500,
+  "n_test": 179499,
+  "best_iteration": 380,
+  "trained_at": "2026-09-18T14:03:02.534657Z"
+}
