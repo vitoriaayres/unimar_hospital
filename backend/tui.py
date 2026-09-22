@@ -1,11 +1,12 @@
 """ABHU TUI - Terminal interface for hospital pharmacy management."""
 
+import os
 import urllib.request
 import urllib.error
 import json as _json
 from datetime import date
 from textual.app import App, ComposeResult
-from textual.containers import Horizontal, Vertical, ScrollableContainer
+from textual.containers import Horizontal, Vertical, ScrollableContainer, HorizontalScroll
 from textual.widgets import Header, Footer, Static, DataTable, Label, Button, Sparkline, Input, Rule
 from textual.css.query import NoMatches
 from textual import on
@@ -85,10 +86,36 @@ def api_post(path, data):
         return None, str(e)
 
 
-def do_login():
-    global _token
+def _load_env() -> dict[str, str]:
+    """Carrega variáveis do arquivo .env"""
+    env = {}
+    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env")
     try:
-        data = "username=admin@hospital.gov.br&password=admin123".encode()
+        with open(env_path) as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    key, value = line.split("=", 1)
+                    env[key.strip()] = value.strip()
+    except Exception:
+        pass
+    return env
+
+
+def _get_login_credentials() -> tuple[str, str]:
+    """Obtém credenciais do .env ou usa padrões"""
+    env = _load_env()
+    email = env.get("TUI_LOGIN_EMAIL", "admin@hospital.gov.br")
+    password = env.get("TUI_LOGIN_PASSWORD", "admin123")
+    return email, password
+
+
+def do_login(email: str | None = None, password: str | None = None):
+    global _token
+    if email is None or password is None:
+        email, password = _get_login_credentials()
+    try:
+        data = f"username={email}&password={password}".encode()
         req = urllib.request.Request(
             f"{API_URL}/login",
             data=data,
@@ -160,8 +187,15 @@ class DashboardView(Static):
         yield DataTable(id="tbl")
         yield Label("", id="sparkline-label")
         yield Sparkline([], id="spark")
+        yield Label("[dim]  Carregando...[/]", id="loading", classes="loading-indicator")
+        yield Label("", id="error", classes="error-indicator")
 
     def on_mount(self) -> None:
+        self._load_data()
+
+    def _load_data(self) -> None:
+        self._set_loading(True)
+        self._set_error(None)
         try:
             t = self.query_one("#tbl", DataTable)
             t.add_columns("Indicador", "Valor", "")
@@ -180,23 +214,33 @@ class DashboardView(Static):
                 for k, v, bar in rows:
                     t.add_row(k, v, bar)
 
-                try:
-                    import psycopg2
-                    conn = psycopg2.connect("postgresql://pharmapredict:pharmapredict_dev@localhost:5432/pharmapredict")
-                    cur = conn.cursor()
-                    cur.execute(
-                        "SELECT SUM(quantity) FROM consumption "
-                        "GROUP BY consumption_date ORDER BY consumption_date DESC LIMIT 30"
-                    )
-                    vals = [int(row[0]) for row in cur.fetchall()]
-                    conn.close()
-                    vals.reverse()
-                    if vals:
-                        spark = self.query_one("#spark", Sparkline)
-                        spark.data = vals
-                        self.query_one("#sparkline-label", Label).update("  [dim]Consumo diario (ultimos 30 dias)[/]")
-                except Exception:
-                    pass
+            # Consumption trend via API
+            trend = api_get("/dashboard/consumption-trends", params={"days": 30})
+            if trend and "items" in trend:
+                vals = [item["total_quantity"] for item in reversed(trend["items"])]
+                if vals:
+                    spark = self.query_one("#spark", Sparkline)
+                    spark.data = vals
+                    self.query_one("#sparkline-label", Label).update("  [dim]Consumo diario (ultimos 30 dias)[/]")
+        except Exception as e:
+            self._set_error(f"Erro ao carregar dashboard: {e}")
+        finally:
+            self._set_loading(False)
+
+    def _set_loading(self, loading: bool) -> None:
+        try:
+            self.query_one("#loading", Label).display = loading
+        except Exception:
+            pass
+
+    def _set_error(self, msg: str | None) -> None:
+        try:
+            err_label = self.query_one("#error", Label)
+            if msg:
+                err_label.update(f"  [red]{msg}[/]")
+                err_label.display = True
+            else:
+                err_label.display = False
         except Exception:
             pass
 
@@ -218,16 +262,22 @@ class ProdutosView(Static):
         yield DataTable(id="tbl")
         yield Label("[dim]  Clique em uma linha para ver detalhes[/]", id="hint")
         yield Label("", id="detail")
+        yield Label("[dim]  Carregando...[/]", id="loading", classes="loading-indicator")
+        yield Label("", id="error", classes="error-indicator")
 
     def on_mount(self) -> None:
         self._load_data()
 
-    def _load_data(self):
+    def _load_data(self) -> None:
+        self._set_loading(True)
+        self._set_error(None)
         try:
             self.__class__._all_data = api_get("/dashboard/stockout-risk", params={"limit": 100}) or []
             self._render_table(self._all_data)
-        except Exception:
-            pass
+        except Exception as e:
+            self._set_error(f"Erro ao carregar produtos: {e}")
+        finally:
+            self._set_loading(False)
 
     def _render_table(self, data):
         try:
@@ -276,6 +326,23 @@ class ProdutosView(Static):
             )
             self.query_one("#detail", Label).update(detail)
 
+    def _set_loading(self, loading: bool) -> None:
+        try:
+            self.query_one("#loading", Label).display = loading
+        except Exception:
+            pass
+
+    def _set_error(self, msg: str | None) -> None:
+        try:
+            err_label = self.query_one("#error", Label)
+            if msg:
+                err_label.update(f"  [red]{msg}[/]")
+                err_label.display = True
+            else:
+                err_label.display = False
+        except Exception:
+            pass
+
     @on(Input.Changed, "#search")
     def on_search(self):
         self._apply_filters()
@@ -308,17 +375,23 @@ class AlertasView(Static):
         yield Label("", id="summary")
         yield Label("[dim]  Clique em uma linha para ver detalhes[/]", id="hint")
         yield Label("", id="detail")
+        yield Label("[dim]  Carregando...[/]", id="loading", classes="loading-indicator")
+        yield Label("", id="error", classes="error-indicator")
 
     def on_mount(self) -> None:
         self._load_data()
 
-    def _load_data(self):
+    def _load_data(self) -> None:
+        self._set_loading(True)
+        self._set_error(None)
         try:
             d = api_get("/alerts", params={"size": 100})
             self.__class__._all_data = _get_items(d)
             self._apply_filters()
-        except Exception:
-            pass
+        except Exception as e:
+            self._set_error(f"Erro ao carregar alertas: {e}")
+        finally:
+            self._set_loading(False)
 
     def _apply_filters(self):
         search = self.query_one("#search", Input).value.lower()
@@ -356,6 +429,23 @@ class AlertasView(Static):
                 item.get("message") or "-",
                 (item.get("created_at") or "-")[:10],
             )
+
+    def _set_loading(self, loading: bool) -> None:
+        try:
+            self.query_one("#loading", Label).display = loading
+        except Exception:
+            pass
+
+    def _set_error(self, msg: str | None) -> None:
+        try:
+            err_label = self.query_one("#error", Label)
+            if msg:
+                err_label.update(f"  [red]{msg}[/]")
+                err_label.display = True
+            else:
+                err_label.display = False
+        except Exception:
+            pass
 
     @on(DataTable.RowSelected, "#tbl")
     def on_row_selected(self, event: DataTable.RowSelected) -> None:
@@ -404,16 +494,22 @@ class VencimentoView(Static):
         yield Label("", id="summary")
         yield Label("[dim]  Clique em uma linha para ver detalhes[/]", id="hint")
         yield Label("", id="detail")
+        yield Label("[dim]  Carregando...[/]", id="loading", classes="loading-indicator")
+        yield Label("", id="error", classes="error-indicator")
 
     def on_mount(self) -> None:
         self._load_data()
 
-    def _load_data(self):
+    def _load_data(self) -> None:
+        self._set_loading(True)
+        self._set_error(None)
         try:
             self.__class__._all_data = api_get("/dashboard/expiry-timeline", params={"days_ahead": 90, "limit": 100}) or []
             self._apply_filters()
-        except Exception:
-            pass
+        except Exception as e:
+            self._set_error(f"Erro ao carregar vencimentos: {e}")
+        finally:
+            self._set_loading(False)
 
     def _apply_filters(self):
         search = self.query_one("#search", Input).value.lower()
@@ -462,6 +558,23 @@ class VencimentoView(Static):
                 f"[{style}]{urg_str}[/]",
             )
 
+    def _set_loading(self, loading: bool) -> None:
+        try:
+            self.query_one("#loading", Label).display = loading
+        except Exception:
+            pass
+
+    def _set_error(self, msg: str | None) -> None:
+        try:
+            err_label = self.query_one("#error", Label)
+            if msg:
+                err_label.update(f"  [red]{msg}[/]")
+                err_label.display = True
+            else:
+                err_label.display = False
+        except Exception:
+            pass
+
     @on(DataTable.RowSelected, "#tbl")
     def on_row_selected(self, event: DataTable.RowSelected) -> None:
         row_idx = event.row_index
@@ -485,6 +598,7 @@ class VencimentoView(Static):
 
     @on(Input.Changed, "#search")
     def on_search(self):
+        self._apply_filters()
         self._apply_filters()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -513,25 +627,35 @@ class EstoqueView(Static):
         yield DataTable(id="tbl")
         yield Label("[dim]  Clique em uma linha para ver detalhes[/]", id="hint")
         yield Label("", id="detail")
+        yield Label("[dim]  Carregando...[/]", id="loading", classes="loading-indicator")
+        yield Label("", id="error", classes="error-indicator")
 
     def on_mount(self) -> None:
+        self._load_data()
+
+    def _load_data(self) -> None:
+        self._set_loading(True)
+        self._set_error(None)
         try:
-            import psycopg2
-            conn = psycopg2.connect("postgresql://pharmapredict:pharmapredict_dev@localhost:5432/pharmapredict")
-            cur = conn.cursor()
-            cur.execute(
-                "SELECT p.name, ib.batch_number, ib.quantity, ib.unit_cost, ib.expiry_date, ib.status "
-                "FROM inventory_batches ib JOIN products p ON ib.product_id = p.id "
-                "ORDER BY ib.expiry_date ASC LIMIT 100"
-            )
-            self.__class__._all_data = [
-                {"name": r[0], "batch": r[1], "qty": r[2], "cost": r[3], "expiry": str(r[4]), "status": r[5]}
-                for r in cur.fetchall()
-            ]
-            conn.close()
+            d = api_get("/inventory/batches", params={"limit": 200})
+            if d:
+                items = _get_items(d)
+                self.__class__._all_data = [
+                    {
+                        "name": item.get("product_name", "-"),
+                        "batch": item.get("batch_number", "-"),
+                        "qty": item.get("quantity", 0),
+                        "cost": item.get("unit_cost", 0),
+                        "expiry": item.get("expiry_date", "-"),
+                        "status": item.get("status", "-"),
+                    }
+                    for item in items
+                ]
             self._apply_filters()
-        except Exception:
-            pass
+        except Exception as e:
+            self._set_error(f"Erro ao carregar estoque: {e}")
+        finally:
+            self._set_loading(False)
 
     def _apply_filters(self):
         search = self.query_one("#search", Input).value.lower()
@@ -546,7 +670,7 @@ class EstoqueView(Static):
         t = self.query_one("#tbl", DataTable)
         t.clear()
         t.add_columns("#", "Produto", "Lote", "Qtd", "Custo", "Vencimento", "Status")
-        for i, item in enumerate(filtered[:30], 1):
+        for i, item in enumerate(filtered[:50], 1):
             status_color = "green" if item["status"] == "available" else "red"
             t.add_row(
                 str(i),
@@ -557,6 +681,23 @@ class EstoqueView(Static):
                 item.get("expiry") or "-",
                 f"[{status_color}]{item.get('status', '-')}[/]",
             )
+
+    def _set_loading(self, loading: bool) -> None:
+        try:
+            self.query_one("#loading", Label).display = loading
+        except Exception:
+            pass
+
+    def _set_error(self, msg: str | None) -> None:
+        try:
+            err_label = self.query_one("#error", Label)
+            if msg:
+                err_label.update(f"  [red]{msg}[/]")
+                err_label.display = True
+            else:
+                err_label.display = False
+        except Exception:
+            pass
 
     @on(DataTable.RowSelected, "#tbl")
     def on_row_selected(self, event: DataTable.RowSelected) -> None:
@@ -597,22 +738,26 @@ class ConsumoView(Static):
         yield DataTable(id="tbl")
         yield Sparkline([], id="spark")
         yield Label("", id="stats")
+        yield Label("[dim]  Carregando...[/]", id="loading", classes="loading-indicator")
+        yield Label("", id="error", classes="error-indicator")
 
     def on_mount(self) -> None:
+        self._load_data()
+
+    def _load_data(self) -> None:
+        self._set_loading(True)
+        self._set_error(None)
         try:
-            import psycopg2
-            conn = psycopg2.connect("postgresql://pharmapredict:pharmapredict_dev@localhost:5432/pharmapredict")
-            cur = conn.cursor()
-            cur.execute(
-                "SELECT consumption_date, SUM(quantity) FROM consumption "
-                "GROUP BY consumption_date ORDER BY consumption_date DESC LIMIT 60"
-            )
-            rows = cur.fetchall()
-            conn.close()
-            self.__class__._all_data = [{"date": str(r[0]), "qty": int(r[1])} for r in rows]
+            trend = api_get("/dashboard/consumption-trends", params={"days": 60})
+            if trend and "items" in trend:
+                self.__class__._all_data = trend["items"]
+            else:
+                self.__class__._all_data = []
             self._apply_filters()
-        except Exception:
-            pass
+        except Exception as e:
+            self._set_error(f"Erro ao carregar consumo: {e}")
+        finally:
+            self._set_loading(False)
 
     def _apply_filters(self):
         search = self.query_one("#search", Input).value.lower()
@@ -647,6 +792,23 @@ class ConsumoView(Static):
             bar = _mini_bar(total, max_val, 25)
             t.add_row(str(date_val), f"{total:,}", bar)
 
+    def _set_loading(self, loading: bool) -> None:
+        try:
+            self.query_one("#loading", Label).display = loading
+        except Exception:
+            pass
+
+    def _set_error(self, msg: str | None) -> None:
+        try:
+            err_label = self.query_one("#error", Label)
+            if msg:
+                err_label.update(f"  [red]{msg}[/]")
+                err_label.display = True
+            else:
+                err_label.display = False
+        except Exception:
+            pass
+
     @on(Input.Changed, "#search")
     def on_search(self):
         self._apply_filters()
@@ -669,12 +831,48 @@ class MovimentacoesView(Static):
         yield Label("", id="summary")
         yield Label("[dim]  Clique em uma linha para ver detalhes[/]", id="hint")
         yield Label("", id="detail")
+        yield Label("[dim]  Carregando...[/]", id="loading", classes="loading-indicator")
+        yield Label("", id="error", classes="error-indicator")
 
     def on_mount(self) -> None:
+        self._load_data()
+
+    def _load_data(self) -> None:
+        self._set_loading(True)
+        self._set_error(None)
         try:
             d = api_get("/inventory/movements", params={"limit": 100})
             self.__class__._all_data = _get_items(d)
             self._apply_filters()
+        except Exception as e:
+            self._set_error(f"Erro ao carregar movimentacoes: {e}")
+        finally:
+            self._set_loading(False)
+
+    def _apply_filters(self):
+        search = self.query_one("#search", Input).value.lower()
+        mtype = self._filter_type
+        filtered = self._all_data
+        if search:
+            filtered = [x for x in filtered if search in (x.get("movement_type") or "").lower() or search in (x.get("batch_id") or "").lower()]
+        if mtype and mtype != "todos":
+            filtered = [x for x in filtered if x.get("movement_type") == mtype]
+        self.__class__._filtered_data = filtered
+
+    def _set_loading(self, loading: bool) -> None:
+        try:
+            self.query_one("#loading", Label).display = loading
+        except Exception:
+            pass
+
+    def _set_error(self, msg: str | None) -> None:
+        try:
+            err_label = self.query_one("#error", Label)
+            if msg:
+                err_label.update(f"  [red]{msg}[/]")
+                err_label.display = True
+            else:
+                err_label.display = False
         except Exception:
             pass
 
@@ -747,8 +945,15 @@ class UsuariosView(Static):
     def compose(self) -> ComposeResult:
         yield Label("  Usuarios", classes="view-title")
         yield DataTable(id="tbl")
+        yield Label("[dim]  Carregando...[/]", id="loading", classes="loading-indicator")
+        yield Label("", id="error", classes="error-indicator")
 
     def on_mount(self) -> None:
+        self._load_data()
+
+    def _load_data(self) -> None:
+        self._set_loading(True)
+        self._set_error(None)
         try:
             t = self.query_one("#tbl", DataTable)
             t.add_columns("#", "Nome", "E-mail", "Papel", "Ativo")
@@ -757,6 +962,25 @@ class UsuariosView(Static):
             for i, item in enumerate(items, 1):
                 ativo = "[green]Sim[/]" if item.get("is_active") else "[red]Nao[/]"
                 t.add_row(str(i), item.get("full_name", "-"), item.get("email", "-"), item.get("role", "-"), ativo)
+        except Exception as e:
+            self._set_error(f"Erro ao carregar usuarios: {e}")
+        finally:
+            self._set_loading(False)
+
+    def _set_loading(self, loading: bool) -> None:
+        try:
+            self.query_one("#loading", Label).display = loading
+        except Exception:
+            pass
+
+    def _set_error(self, msg: str | None) -> None:
+        try:
+            err_label = self.query_one("#error", Label)
+            if msg:
+                err_label.update(f"  [red]{msg}[/]")
+                err_label.display = True
+            else:
+                err_label.display = False
         except Exception:
             pass
 
@@ -793,7 +1017,7 @@ class CadastrarProdutoView(Static):
                 yield Input(placeholder="Ex: Amoxicilina", id="f-generic", classes="form-input")
             with Horizontal(classes="form-row"):
                 yield Label("Categoria:", classes="form-label")
-                with Horizontal(id="cat-buttons"):
+                with HorizontalScroll(id="cat-buttons"):
                     for cat in CATEGORIES:
                         active = " -active" if cat == "other" else ""
                         yield Button(CATEGORY_LABELS[cat], id=f"cat-{cat}", classes=f"filter-btn form-btn{active}")
@@ -1284,98 +1508,124 @@ class RegistroConsumoView(Static):
 
 
 class PrevisoesView(Static):
-    """View de Previsoes ML - Mostra previsoes de demanda do modelo treinado."""
-    _all_data = []
-    _selected_idx = None
+    """View de Previsoes ML - Mostra modelos disponiveis e gera previsao sob demanda."""
+    _models = []
+    _products_cache = []
+    _selected_product = None
+    _forecast_data = None
+    _selected_model = "lightgbm-v1"
 
     def compose(self) -> ComposeResult:
         yield Label("  Previsoes de Demanda (ML)", classes="view-title")
         with Horizontal(id="pred-filters"):
-            yield Input(placeholder="Buscar produto...", id="pred-search", classes="filter-input")
-            yield Button("Atualizar", id="pred-refresh", classes="filter-btn")
+            yield Input(placeholder="Buscar produto (nome/SKU)...", id="pred-search", classes="filter-input")
+            yield Button("Gerar Previsao", id="pred-generate", classes="filter-btn", variant="primary")
+        with Horizontal(id="model-select"):
+            yield Label("[dim]Modelo:[/]", classes="form-label")
+            yield Button("LightGBM", id="model-lgb", classes="filter-btn form-btn -active")
+            yield Button("XGBoost", id="model-xgb", classes="filter-btn form-btn")
         yield DataTable(id="tbl")
-        yield Label("[dim]  Clique em uma linha para ver detalhes[/]", id="hint")
+        yield Label("[dim]  Busque um produto e clique em Gerar Previsao[/]", id="hint")
         yield Label("", id="detail")
+        yield Label("[dim]  Carregando...[/]", id="loading", classes="loading-indicator")
+        yield Label("", id="error", classes="error-indicator")
 
     def on_mount(self) -> None:
-        self._load_data()
+        self._load_models()
+        self._load_products()
 
-    def _load_data(self):
+    def _load_models(self) -> None:
         try:
-            import psycopg2
-            conn = psycopg2.connect("postgresql://pharmapredict:pharmapredict_dev@localhost:5432/pharmapredict")
-            cur = conn.cursor()
-            cur.execute("""
-                SELECT p.id, p.sku, p.name, p.category, p.atc_code,
-                       pr.predicted_quantity, pr.confidence_lower, pr.confidence_upper,
-                       pr.mape_score, pr.forecast_date,
-                       COALESCE(inv.stock, 0) as current_stock
-                FROM predictions pr
-                JOIN products p ON pr.product_id = p.id
-                LEFT JOIN (
-                    SELECT product_id, SUM(quantity) as stock
-                    FROM inventory_batches
-                    WHERE status = 'available'
-                    GROUP BY product_id
-                ) inv ON p.id = inv.product_id
-                WHERE p.is_active = true
-                ORDER BY pr.predicted_quantity DESC
-            """)
-            rows = cur.fetchall()
-            conn.close()
+            d = api_get("/models")
+            if d:
+                self.__class__._models = d
+        except Exception:
+            pass
 
-            self.__class__._all_data = []
-            for row in rows:
-                stock = row[10] or 0
-                pred_7d = row[5] or 0
-                days_stock = int(stock / (pred_7d / 7)) if pred_7d > 0 and stock > 0 else None
+    def _load_products(self) -> None:
+        try:
+            d = api_get("/products", params={"size": 500})
+            if d:
+                self.__class__._products_cache = _get_items(d)
+        except Exception:
+            pass
 
-                self.__class__._all_data.append({
-                    "product_id": row[0],
-                    "sku": row[1],
-                    "name": row[2],
-                    "category": row[3],
-                    "atc_code": row[4],
-                    "predicted_7d": pred_7d,
-                    "predicted_daily": round(pred_7d / 7, 1) if pred_7d else 0,
-                    "confidence_lower": row[6],
-                    "confidence_upper": row[7],
-                    "mape": row[8],
-                    "forecast_date": str(row[9]) if row[9] else "-",
-                    "current_stock": stock,
-                    "days_of_stock": days_stock,
-                })
-
-            self._render_table(self._all_data)
+    def _generate_forecast(self) -> None:
+        if not self._selected_product:
+            self._set_error("Selecione um produto primeiro")
+            return
+        self._set_loading(True)
+        self._set_error(None)
+        try:
+            product_id = self._selected_product["id"]
+            data = {"product_id": product_id, "horizon_days": 30, "model_version": self._selected_model}
+            result, err = api_post("/forecast", data)
+            if err:
+                self._set_error(f"Erro ao gerar previsao: {err}")
+            else:
+                self.__class__._forecast_data = result
+                self._render_forecast_table(result)
         except Exception as e:
-            self.query_one("#detail", Label).update(f"  [red]Erro ao carregar previsoes: {e}[/]")
+            self._set_error(f"Erro: {e}")
+        finally:
+            self._set_loading(False)
 
-    def _render_table(self, data):
+    def _render_forecast_table(self, data):
         try:
             t = self.query_one("#tbl", DataTable)
             t.clear()
-            if not data:
-                self.query_one("#detail", Label).update("  [dim]Nenhuma previsao encontrada. Execute ml/predict.py[/]")
+            if not data or not data.get("predictions"):
+                self.query_one("#detail", Label).update("  [dim]Nenhuma previsao gerada[/]")
                 return
-            t.add_columns("#", "Produto", "Categoria", "Estoque", "Prev Diaria", "Prev 7d", "Dias Estoque", "MAPE")
-            for i, item in enumerate(data[:100], 1):
-                stock_str = f"{item['current_stock']:,}" if item['current_stock'] else "0"
-                days_str = str(item['days_of_stock']) if item['days_of_stock'] is not None else "-"
-                mape_str = f"{item['mape']*100:.1f}%" if item['mape'] else "-"
+            t.add_columns("#", "Data", "Previsto", "IC Inferior", "IC Superior")
+            for i, pred in enumerate(data["predictions"], 1):
                 t.add_row(
                     str(i),
-                    item["name"][:35],
-                    item["category"][:12],
-                    stock_str,
-                    f"{item['predicted_daily']:,.0f}",
-                    f"{item['predicted_7d']:,}",
-                    days_str,
-                    mape_str,
+                    pred["forecast_date"],
+                    f"{pred['predicted_quantity']:,}",
+                    f"{pred['confidence_lower']:,}",
+                    f"{pred['confidence_upper']:,}",
                 )
+            summary = data.get("summary", {})
             self.query_one("#detail", Label).update(
-                f"  [dim]Total: {len(data)} produtos com previsao | "
-                f"Media prev 7d: {sum(d['predicted_7d'] for d in data) / len(data):,.0f}[/]"
+                f"  [bold]{data.get('product_name', '')}[/] ({data.get('product_sku', '')})\n"
+                f"  Modelo: {data.get('model_version', '')} | Horizonte: {data.get('horizon_days', 0)} dias\n"
+                f"  Media diaria: {summary.get('avg_daily', 0):,.0f} | Total previsto: {summary.get('total_predicted', 0):,}\n"
+                f"  MAPE do modelo: {summary.get('mape', 0)*100:.1f}%"
             )
+        except Exception:
+            pass
+
+    def _render_products_table(self, products):
+        try:
+            t = self.query_one("#tbl", DataTable)
+            t.clear()
+            t.add_columns("#", "Produto", "SKU", "Categoria", "Estoque Atual")
+            for i, p in enumerate(products[:50], 1):
+                t.add_row(
+                    str(i),
+                    p.get("name", "")[:40],
+                    p.get("sku", ""),
+                    p.get("category", ""),
+                    f"{p.get('current_stock', 0):,}",
+                )
+        except Exception:
+            pass
+
+    def _set_loading(self, loading: bool) -> None:
+        try:
+            self.query_one("#loading", Label).display = loading
+        except Exception:
+            pass
+
+    def _set_error(self, msg: str | None) -> None:
+        try:
+            err_label = self.query_one("#error", Label)
+            if msg:
+                err_label.update(f"  [red]{msg}[/]")
+                err_label.display = True
+            else:
+                err_label.display = False
         except Exception:
             pass
 
@@ -1383,53 +1633,85 @@ class PrevisoesView(Static):
     def on_search(self):
         search = self.query_one("#pred-search", Input).value.lower().strip()
         if not search:
-            filtered = self._all_data
+            filtered = self._products_cache
         else:
-            filtered = [x for x in self._all_data
-                       if search in (x.get("name") or "").lower()
-                       or search in (x.get("sku") or "").lower()
-                       or search in (x.get("category") or "").lower()]
-        self._render_table(filtered)
+            filtered = [p for p in self._products_cache
+                       if search in (p.get("name") or "").lower()
+                       or search in (p.get("sku") or "").lower()
+                       or search in (p.get("category") or "").lower()]
+        self._render_products_table(filtered)
 
     @on(DataTable.RowSelected, "#tbl")
     def on_row_selected(self, event: DataTable.RowSelected) -> None:
         row_idx = event.row_index
-        if row_idx is not None and row_idx < len(self._all_data):
-            item = self._all_data[row_idx]
-            detail = (
-                f"  [bold]{item['name']}[/] ({item['sku']})\n"
-                f"  Categoria: {item['category']} | ATC: {item['atc_code']}\n"
-                f"  Previsao 7d: [bold]{item['predicted_7d']:,}[/] "
-                f"(diaria: {item['predicted_daily']:,.0f})\n"
-                f"  Intervalo confianca: [{item['confidence_lower']:,} - {item['confidence_upper']:,}]\n"
-                f"  Estoque atual: [bold]{item['current_stock']:,}[/] | "
-                f"Dias de estoque: [bold]{item['days_of_stock'] or '-'}[/]\n"
-                f"  MAPE: {item['mape']*100:.1f}% | Data previsao: {item['forecast_date']}"
-            )
-            self.query_one("#detail", Label).update(detail)
+        # Determine if we're showing products or forecast
+        if self._forecast_data and self._forecast_data.get("predictions"):
+            # Showing forecast - show detail
+            if row_idx is not None and row_idx < len(self._forecast_data["predictions"]):
+                pred = self._forecast_data["predictions"][row_idx]
+                detail = (
+                    f"  [bold]Data:[/] {pred['forecast_date']}\n"
+                    f"  [bold]Previsto:[/] {pred['predicted_quantity']:,}\n"
+                    f"  [bold]IC 80%:[/] [{pred['confidence_lower']:,} - {pred['confidence_upper']:,}]"
+                )
+                self.query_one("#detail", Label).update(detail)
+        else:
+            # Showing products - select product
+            products = self._get_displayed_products()
+            if row_idx is not None and row_idx < len(products):
+                self.__class__._selected_product = products[row_idx]
+                p = products[row_idx]
+                self.query_one("#detail", Label).update(
+                    f"  [bold]{p.get('name', '')}[/] ({p.get('sku', '')})\n"
+                    f"  Categoria: {p.get('category', '')} | Estoque: {p.get('current_stock', 0):,}\n"
+                    f"  Clique em 'Gerar Previsao' para ver a previsao de 30 dias"
+                )
+
+    def _get_displayed_products(self):
+        search = self.query_one("#pred-search", Input).value.lower().strip()
+        if not search:
+            return self._products_cache
+        return [p for p in self._products_cache
+               if search in (p.get("name") or "").lower()
+               or search in (p.get("sku") or "").lower()
+               or search in (p.get("category") or "").lower()]
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "pred-refresh":
-            self._load_data()
+        btn_id = event.button.id
+        if btn_id == "pred-generate":
+            self._generate_forecast()
+        elif btn_id == "model-lgb":
+            self._selected_model = "lightgbm-v1"
+            self.query_one("#model-lgb", Button).classes = "filter-btn form-btn -active"
+            self.query_one("#model-xgb", Button).classes = "filter-btn form-btn"
+        elif btn_id == "model-xgb":
+            self._selected_model = "xgboost-v1"
+            self.query_one("#model-xgb", Button).classes = "filter-btn form-btn -active"
+            self.query_one("#model-lgb", Button).classes = "filter-btn form-btn"
+        elif btn_id == "pred-refresh":
+            self._load_models()
+            self._load_products()
+            self._forecast_data = None
+            self._render_products_table(self._products_cache)
 
 
 # --------------- App ---------------
 
 
 VIEW_MAP = {
-    "1": DashboardView,
-    "2": ProdutosView,
-    "3": AlertasView,
-    "4": VencimentoView,
-    "5": EstoqueView,
-    "6": ConsumoView,
-    "7": MovimentacoesView,
-    "8": UsuariosView,
-    "9": CadastrarProdutoView,
-    "10": RecebimentoView,
-    "11": DispensacaoView,
-    "12": RegistroConsumoView,
-    "13": PrevisoesView,
+    "dashboard": DashboardView,
+    "produtos": ProdutosView,
+    "alertas": AlertasView,
+    "vencimento": VencimentoView,
+    "estoque": EstoqueView,
+    "consumo": ConsumoView,
+    "movimentacoes": MovimentacoesView,
+    "usuarios": UsuariosView,
+    "cadastrar-produto": CadastrarProdutoView,
+    "recebimento": RecebimentoView,
+    "dispensacao": DispensacaoView,
+    "consumo-diario": RegistroConsumoView,
+    "previsoes": PrevisoesView,
 }
 
 
@@ -1439,6 +1721,7 @@ class ABHUApp(App):
 
     CSS = """
     Screen { background: $surface; }
+    #logo { height: 3; margin: 1 0 0 1; text-align: center; text-style: bold; color: $primary; }
     #sidebar {
         width: 30;
         background: $panel;
@@ -1520,47 +1803,49 @@ class ABHUApp(App):
     .form-btn-clear:hover { background: $primary 20%; }
     .form-ref-title { color: $text-muted; margin: 0 0 0 2; }
     .form-ref-table { height: 12; margin: 0 0 1 2; }
+    #cat-buttons { height: 3; padding: 0 1; }
+    #cat-buttons > Button { min-width: 14; }
     """
 
     def compose(self) -> ComposeResult:
         yield Header()
         with Horizontal():
             with Vertical(id="sidebar"):
-                yield Label("[bold cyan]PharmaPredict[/]")
+                yield Label("[bold cyan]PharmaPredict[/]", id="logo")
                 yield Label("[dim]v2.0[/]")
                 yield Label("")
                 yield Label("[bold]Consulta[/]")
-                yield Button("1 Dashboard", id="btn-1", classes="-active")
-                yield Button("2 Produtos", id="btn-2")
-                yield Button("3 Alertas", id="btn-3")
-                yield Button("4 Vencimento", id="btn-4")
-                yield Button("5 Estoque", id="btn-5")
-                yield Button("6 Consumo", id="btn-6")
-                yield Button("7 Movimentacoes", id="btn-7")
-                yield Button("8 Usuarios", id="btn-8")
-                yield Button("13 Previsoes ML", id="btn-13")
+                yield Button("Dashboard", id="btn-dashboard", classes="-active")
+                yield Button("Produtos", id="btn-produtos")
+                yield Button("Alertas", id="btn-alertas")
+                yield Button("Vencimento", id="btn-vencimento")
+                yield Button("Estoque", id="btn-estoque")
+                yield Button("Consumo", id="btn-consumo")
+                yield Button("Movimentacoes", id="btn-movimentacoes")
+                yield Button("Usuarios", id="btn-usuarios")
+                yield Button("Previsoes ML", id="btn-previsoes")
                 yield Label("")
                 yield Label("[bold]Cadastro[/]")
-                yield Button("9 Cadastrar Produto", id="btn-9")
-                yield Button("10 Recebimento", id="btn-10")
-                yield Button("11 Dispensacao", id="btn-11")
-                yield Button("12 Consumo Diario", id="btn-12")
+                yield Button("Cadastrar Produto", id="btn-cadastrar-produto")
+                yield Button("Recebimento", id="btn-recebimento")
+                yield Button("Dispensacao", id="btn-dispensacao")
+                yield Button("Consumo Diario", id="btn-consumo-diario")
                 yield Label("")
                 yield Button("q Sair", id="btn-q")
             with Vertical(id="content"):
-                yield DashboardView(id="v-1")
-                yield ProdutosView(id="v-2", classes="hidden")
-                yield AlertasView(id="v-3", classes="hidden")
-                yield VencimentoView(id="v-4", classes="hidden")
-                yield EstoqueView(id="v-5", classes="hidden")
-                yield ConsumoView(id="v-6", classes="hidden")
-                yield MovimentacoesView(id="v-7", classes="hidden")
-                yield UsuariosView(id="v-8", classes="hidden")
-                yield CadastrarProdutoView(id="v-9", classes="hidden")
-                yield RecebimentoView(id="v-10", classes="hidden")
-                yield DispensacaoView(id="v-11", classes="hidden")
-                yield RegistroConsumoView(id="v-12", classes="hidden")
-                yield PrevisoesView(id="v-13", classes="hidden")
+                yield DashboardView(id="v-dashboard")
+                yield ProdutosView(id="v-produtos", classes="hidden")
+                yield AlertasView(id="v-alertas", classes="hidden")
+                yield VencimentoView(id="v-vencimento", classes="hidden")
+                yield EstoqueView(id="v-estoque", classes="hidden")
+                yield ConsumoView(id="v-consumo", classes="hidden")
+                yield MovimentacoesView(id="v-movimentacoes", classes="hidden")
+                yield UsuariosView(id="v-usuarios", classes="hidden")
+                yield CadastrarProdutoView(id="v-cadastrar-produto", classes="hidden")
+                yield RecebimentoView(id="v-recebimento", classes="hidden")
+                yield DispensacaoView(id="v-dispensacao", classes="hidden")
+                yield RegistroConsumoView(id="v-consumo-diario", classes="hidden")
+                yield PrevisoesView(id="v-previsoes", classes="hidden")
         yield Footer()
 
     def _show_view(self, key: str):
