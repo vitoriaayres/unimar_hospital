@@ -1,15 +1,13 @@
 from __future__ import annotations
 
-from datetime import date
 from typing import Annotated
-from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
-from sqlalchemy import select, func, and_
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, get_db, require_manager
-from app.models import Consumption, Product, User, Department, PrescriptionType
+from app.api.deps import get_current_user, get_db
+from app.models import Consumption, Product, User
 from app.schemas.consumption import (
     ConsumptionBase,
     ConsumptionBulkCreate,
@@ -18,10 +16,10 @@ from app.schemas.consumption import (
     ConsumptionResponse,
 )
 
-router = APIRouter(prefix="/consumption")
+router = APIRouter(prefix='/consumption')
 
 
-@router.get("", response_model=ConsumptionListResponse, summary="List consumption records")
+@router.get('', response_model=ConsumptionListResponse, summary='List consumption records')
 async def list_consumption(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
@@ -50,7 +48,7 @@ async def list_consumption(
 
     # Apply sorting
     sort_column = getattr(Consumption, params.sort_by, Consumption.consumption_date)
-    if params.sort_order == "desc":
+    if params.sort_order == 'desc':
         query = query.order_by(sort_column.desc())
     else:
         query = query.order_by(sort_column.asc())
@@ -71,7 +69,12 @@ async def list_consumption(
     )
 
 
-@router.post("", response_model=ConsumptionResponse, status_code=status.HTTP_201_CREATED, summary="Create consumption record")
+@router.post(
+    '',
+    response_model=ConsumptionResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary='Create consumption record',
+)
 async def create_consumption(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
@@ -79,11 +82,14 @@ async def create_consumption(
 ) -> ConsumptionResponse:
     # Verify product exists
     from app.models import Product
-    product_result = await db.execute(select(Product).where(Product.id == consumption_data.product_id))
+
+    product_result = await db.execute(
+        select(Product).where(Product.id == consumption_data.product_id)
+    )
     if not product_result.scalar_one_or_none():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Product not found",
+            detail='Product not found',
         )
 
     consumption = Consumption(**consumption_data.model_dump())
@@ -94,7 +100,12 @@ async def create_consumption(
     return ConsumptionResponse.model_validate(consumption)
 
 
-@router.post("/bulk", response_model=list[ConsumptionResponse], status_code=status.HTTP_201_CREATED, summary="Bulk create consumption records")
+@router.post(
+    '/bulk',
+    response_model=list[ConsumptionResponse],
+    status_code=status.HTTP_201_CREATED,
+    summary='Bulk create consumption records',
+)
 async def bulk_create_consumption(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
@@ -108,7 +119,7 @@ async def bulk_create_consumption(
     return [ConsumptionResponse.model_validate(c) for c in consumptions]
 
 
-@router.post("/import", summary="Import consumption from CSV")
+@router.post('/import', summary='Import consumption from CSV')
 async def import_consumption(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
@@ -117,25 +128,25 @@ async def import_consumption(
     import csv
     import io
 
-    if not file.filename or not file.filename.endswith(".csv"):
+    if not file.filename or not file.filename.endswith('.csv'):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only CSV files are supported. Upload a .csv file.",
+            detail='Only CSV files are supported. Upload a .csv file.',
         )
 
     content = await file.read()
     try:
-        text = content.decode("utf-8")
+        text = content.decode('utf-8')
     except UnicodeDecodeError:
-        text = content.decode("latin-1")
+        text = content.decode('latin-1')
 
     reader = csv.DictReader(io.StringIO(text))
 
-    required_cols = {"product_id", "consumption_date", "quantity", "department"}
+    required_cols = {'product_id', 'consumption_date', 'quantity', 'department'}
     if not reader.fieldnames or not required_cols.issubset(set(reader.fieldnames)):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"CSV must have columns: {', '.join(sorted(required_cols))}. Found: {reader.fieldnames}",
+            detail=f'CSV must have columns: {", ".join(sorted(required_cols))}. Found: {reader.fieldnames}',
         )
 
     created = []
@@ -143,33 +154,35 @@ async def import_consumption(
 
     for row_num, row in enumerate(reader, start=2):
         try:
-            product_id = row["product_id"].strip()
-            quantity = int(row["quantity"].strip())
-            department = row["department"].strip()
-            prescription_type = row.get("prescription_type", "routine").strip()
-            consumption_date = row["consumption_date"].strip()
+            product_id = row['product_id'].strip()
+            quantity = int(row['quantity'].strip())
+            department = row['department'].strip()
+            prescription_type = row.get('prescription_type', 'routine').strip()
+            consumption_date = row['consumption_date'].strip()
 
             if quantity <= 0:
-                errors.append({"row": row_num, "error": "Quantity must be > 0"})
+                errors.append({'row': row_num, 'error': 'Quantity must be > 0'})
                 continue
 
-            if department not in ("icu", "er", "ward", "outpatient"):
-                errors.append({"row": row_num, "error": f"Invalid department: {department}"})
+            if department not in ('icu', 'er', 'ward', 'outpatient'):
+                errors.append({'row': row_num, 'error': f'Invalid department: {department}'})
                 continue
 
-            if prescription_type not in ("routine", "emergency", "prophylactic"):
-                prescription_type = "routine"
+            if prescription_type not in ('routine', 'emergency', 'prophylactic'):
+                prescription_type = 'routine'
 
             from datetime import date as _date
-            parts = consumption_date.split("-")
+
+            parts = consumption_date.split('-')
             cons_date = _date(int(parts[0]), int(parts[1]), int(parts[2]))
 
             from uuid import UUID
+
             prod_uuid = UUID(product_id)
 
             product_result = await db.execute(select(Product).where(Product.id == prod_uuid))
             if not product_result.scalar_one_or_none():
-                errors.append({"row": row_num, "error": f"Product not found: {product_id}"})
+                errors.append({'row': row_num, 'error': f'Product not found: {product_id}'})
                 continue
 
             consumption = Consumption(
@@ -183,13 +196,13 @@ async def import_consumption(
             created.append(row_num)
 
         except Exception as e:
-            errors.append({"row": row_num, "error": str(e)})
+            errors.append({'row': row_num, 'error': str(e)})
 
     if created:
         await db.commit()
 
     return {
-        "imported": len(created),
-        "errors": len(errors),
-        "error_details": errors[:20],
+        'imported': len(created),
+        'errors': len(errors),
+        'error_details': errors[:20],
     }

@@ -5,11 +5,19 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select, func, and_
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, get_db, require_manager
-from app.models import InventoryBatch, StockMovement, Product, User, UserRole, BatchStatus, MovementType
+from app.api.deps import get_current_user, get_db
+from app.models import (
+    BatchStatus,
+    InventoryBatch,
+    MovementType,
+    Product,
+    StockMovement,
+    User,
+    UserRole,
+)
 from app.schemas.inventory import (
     InventoryBatchCreate,
     InventoryBatchResponse,
@@ -19,56 +27,89 @@ from app.schemas.inventory import (
     StockMovementResponse,
 )
 
-router = APIRouter(prefix="/inventory")
+router = APIRouter(prefix='/inventory')
 
 
 def _check_manager_or_admin(user: User) -> None:
     if user.role not in (UserRole.MANAGER, UserRole.ADMIN):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only managers and administrators can perform this action",
+            detail='Only managers and administrators can perform this action',
         )
 
 
-@router.get("/summary", response_model=list[InventorySummary], summary="Get inventory summary for all products")
+@router.get(
+    '/summary',
+    response_model=list[InventorySummary],
+    summary='Get inventory summary for all products',
+)
 async def get_inventory_summary(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
-    low_stock_only: bool = Query(default=False, description="Show only low stock items"),
-    expiring_days: int = Query(default=90, ge=1, le=365, description="Days until expiry to flag"),
+    low_stock_only: bool = Query(default=False, description='Show only low stock items'),
+    expiring_days: int = Query(default=90, ge=1, le=365, description='Days until expiry to flag'),
 ) -> list[InventorySummary]:
     # Get all active products with their batch aggregates
     query = (
         select(
-            Product.id.label("product_id"),
-            Product.name.label("product_name"),
-            Product.sku.label("product_sku"),
+            Product.id.label('product_id'),
+            Product.name.label('product_name'),
+            Product.sku.label('product_sku'),
             Product.min_stock_level,
             Product.max_stock_level,
-            func.coalesce(func.sum(InventoryBatch.quantity), 0).label("total_quantity"),
-            func.coalesce(func.sum(InventoryBatch.quantity).filter(InventoryBatch.status == BatchStatus.AVAILABLE), 0).label("available_quantity"),
-            func.coalesce(func.sum(InventoryBatch.quantity).filter(InventoryBatch.status == BatchStatus.RESERVED), 0).label("reserved_quantity"),
-            func.coalesce(func.sum(InventoryBatch.quantity).filter(InventoryBatch.status == BatchStatus.EXPIRED), 0).label("expired_quantity"),
-            func.count(InventoryBatch.id).label("batches_count"),
-            func.count(InventoryBatch.id).filter(
+            func.coalesce(func.sum(InventoryBatch.quantity), 0).label('total_quantity'),
+            func.coalesce(
+                func.sum(InventoryBatch.quantity).filter(
+                    InventoryBatch.status == BatchStatus.AVAILABLE
+                ),
+                0,
+            ).label('available_quantity'),
+            func.coalesce(
+                func.sum(InventoryBatch.quantity).filter(
+                    InventoryBatch.status == BatchStatus.RESERVED
+                ),
+                0,
+            ).label('reserved_quantity'),
+            func.coalesce(
+                func.sum(InventoryBatch.quantity).filter(
+                    InventoryBatch.status == BatchStatus.EXPIRED
+                ),
+                0,
+            ).label('expired_quantity'),
+            func.count(InventoryBatch.id).label('batches_count'),
+            func.count(InventoryBatch.id)
+            .filter(
                 and_(
                     InventoryBatch.expiry_date <= func.current_date() + expiring_days,
                     InventoryBatch.expiry_date >= func.current_date(),
                     InventoryBatch.status == BatchStatus.AVAILABLE,
                 )
-            ).label("batches_expiring_30d"),
-            func.count(InventoryBatch.id).filter(
+            )
+            .label('batches_expiring_30d'),
+            func.count(InventoryBatch.id)
+            .filter(
                 and_(
                     InventoryBatch.expiry_date <= func.current_date() + expiring_days,
                     InventoryBatch.expiry_date >= func.current_date(),
                     InventoryBatch.status == BatchStatus.AVAILABLE,
                 )
-            ).label("batches_expiring_90d"),
-            func.coalesce(func.sum(InventoryBatch.quantity * InventoryBatch.unit_cost), 0).label("total_value"),
+            )
+            .label('batches_expiring_90d'),
+            func.coalesce(func.sum(InventoryBatch.quantity * InventoryBatch.unit_cost), 0).label(
+                'total_value'
+            ),
         )
-        .outerjoin(InventoryBatch, and_(Product.id == InventoryBatch.product_id, InventoryBatch.status != BatchStatus.RECALLED))
-        .where(Product.is_active == True)
-        .group_by(Product.id, Product.name, Product.sku, Product.min_stock_level, Product.max_stock_level)
+        .outerjoin(
+            InventoryBatch,
+            and_(
+                Product.id == InventoryBatch.product_id,
+                InventoryBatch.status != BatchStatus.RECALLED,
+            ),
+        )
+        .where(Product.is_active.is_(True))
+        .group_by(
+            Product.id, Product.name, Product.sku, Product.min_stock_level, Product.max_stock_level
+        )
     )
 
     result = await db.execute(query)
@@ -116,7 +157,9 @@ async def get_inventory_summary(
     return summaries
 
 
-@router.get("/batches", response_model=list[InventoryBatchResponse], summary="List inventory batches")
+@router.get(
+    '/batches', response_model=list[InventoryBatchResponse], summary='List inventory batches'
+)
 async def list_batches(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
@@ -136,6 +179,7 @@ async def list_batches(
 
     if expiring_within_days:
         from datetime import date, timedelta
+
         expiry_limit = date.today() + timedelta(days=expiring_within_days)
         query = query.where(
             and_(
@@ -151,7 +195,12 @@ async def list_batches(
     return [InventoryBatchResponse.model_validate(b) for b in batches]
 
 
-@router.post("/batches", response_model=InventoryBatchResponse, status_code=status.HTTP_201_CREATED, summary="Create new inventory batch")
+@router.post(
+    '/batches',
+    response_model=InventoryBatchResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary='Create new inventory batch',
+)
 async def create_batch(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
@@ -164,7 +213,7 @@ async def create_batch(
     if not product_result.scalar_one_or_none():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Product not found",
+            detail='Product not found',
         )
 
     batch = InventoryBatch(**batch_data.model_dump())
@@ -175,7 +224,7 @@ async def create_batch(
     return InventoryBatchResponse.model_validate(batch)
 
 
-@router.get("/batches/{batch_id}", response_model=InventoryBatchResponse, summary="Get batch by ID")
+@router.get('/batches/{batch_id}', response_model=InventoryBatchResponse, summary='Get batch by ID')
 async def get_batch(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
@@ -187,13 +236,13 @@ async def get_batch(
     if not batch:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Batch not found",
+            detail='Batch not found',
         )
 
     return InventoryBatchResponse.model_validate(batch)
 
 
-@router.patch("/batches/{batch_id}", response_model=InventoryBatchResponse, summary="Update batch")
+@router.patch('/batches/{batch_id}', response_model=InventoryBatchResponse, summary='Update batch')
 async def update_batch(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
@@ -208,7 +257,7 @@ async def update_batch(
     if not batch:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Batch not found",
+            detail='Batch not found',
         )
 
     update_data = batch_data.model_dump(exclude_unset=True)
@@ -221,19 +270,26 @@ async def update_batch(
     return InventoryBatchResponse.model_validate(batch)
 
 
-@router.post("/movements", response_model=StockMovementResponse, status_code=status.HTTP_201_CREATED, summary="Record stock movement")
+@router.post(
+    '/movements',
+    response_model=StockMovementResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary='Record stock movement',
+)
 async def create_movement(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
     movement_data: StockMovementCreate,
 ) -> StockMovementResponse:
-    result = await db.execute(select(InventoryBatch).where(InventoryBatch.id == movement_data.batch_id))
+    result = await db.execute(
+        select(InventoryBatch).where(InventoryBatch.id == movement_data.batch_id)
+    )
     batch = result.scalar_one_or_none()
 
     if not batch:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Batch not found",
+            detail='Batch not found',
         )
 
     # Validate movement
@@ -241,7 +297,7 @@ async def create_movement(
         if batch.quantity + movement_data.quantity_change < 0:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Insufficient stock for this movement",
+                detail='Insufficient stock for this movement',
             )
 
     movement = StockMovement(
@@ -254,8 +310,11 @@ async def create_movement(
 
     # Auto-update status
     from datetime import date
+
     if batch.quantity == 0:
-        batch.status = BatchStatus.EXPIRED if batch.expiry_date < date.today() else BatchStatus.AVAILABLE
+        batch.status = (
+            BatchStatus.EXPIRED if batch.expiry_date < date.today() else BatchStatus.AVAILABLE
+        )
     elif batch.expiry_date < date.today():
         batch.status = BatchStatus.EXPIRED
 
@@ -266,7 +325,9 @@ async def create_movement(
     return StockMovementResponse.model_validate(movement)
 
 
-@router.get("/movements", response_model=list[StockMovementResponse], summary="List stock movements")
+@router.get(
+    '/movements', response_model=list[StockMovementResponse], summary='List stock movements'
+)
 async def list_movements(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],

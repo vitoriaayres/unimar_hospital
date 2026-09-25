@@ -2,86 +2,127 @@ from __future__ import annotations
 
 from datetime import date
 from typing import Annotated
-from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select, func, and_
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
 from app.models import (
-    Product, InventoryBatch, Consumption, Alert, User, Prediction,
-    BatchStatus, AlertType, AlertSeverity, Department
+    Alert,
+    AlertType,
+    BatchStatus,
+    Consumption,
+    Department,
+    InventoryBatch,
+    Prediction,
+    Product,
+    User,
 )
 from app.schemas.dashboard import (
-    DashboardResponse,
-    DashboardKPIs,
-    StockoutRiskItem,
-    ExpiryTimelineItem,
     ConsumptionTrendPoint,
+    DashboardKPIs,
+    DashboardResponse,
+    ExpiryTimelineItem,
+    StockoutRiskItem,
 )
 
-router = APIRouter(prefix="/dashboard")
+router = APIRouter(prefix='/dashboard')
 
 
-@router.get("/kpis", response_model=DashboardKPIs, summary="Get dashboard KPIs")
+@router.get('/kpis', response_model=DashboardKPIs, summary='Get dashboard KPIs')
 async def get_kpis(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> DashboardKPIs:
     # Total SKUs
-    total_skus = await db.scalar(select(func.count(Product.id)).where(Product.is_active == True)) or 0
+    total_skus = (
+        await db.scalar(select(func.count(Product.id)).where(Product.is_active.is_(True))) or 0
+    )
 
     # Low stock count
     low_stock_subq = (
-        select(func.coalesce(func.sum(InventoryBatch.quantity).filter(InventoryBatch.status == BatchStatus.AVAILABLE), 0))
-        .where(and_(InventoryBatch.product_id == Product.id, InventoryBatch.status != BatchStatus.RECALLED))
+        select(
+            func.coalesce(
+                func.sum(InventoryBatch.quantity).filter(
+                    InventoryBatch.status == BatchStatus.AVAILABLE
+                ),
+                0,
+            )
+        )
+        .where(
+            and_(
+                InventoryBatch.product_id == Product.id,
+                InventoryBatch.status != BatchStatus.RECALLED,
+            )
+        )
         .scalar_subquery()
     )
-    low_stock_count = await db.scalar(
-        select(func.count(Product.id))
-        .where(and_(Product.is_active == True, low_stock_subq <= Product.min_stock_level))
-    ) or 0
+    low_stock_count = (
+        await db.scalar(
+            select(func.count(Product.id)).where(
+                and_(Product.is_active.is_(True), low_stock_subq <= Product.min_stock_level)
+            )
+        )
+        or 0
+    )
 
     # Stockout risk count (simplified)
-    stockout_risk_count = await db.scalar(
-        select(func.count(Alert.id))
-        .where(and_(Alert.alert_type == AlertType.SHORTAGE_RISK, Alert.acknowledged == False))
-    ) or 0
+    stockout_risk_count = (
+        await db.scalar(
+            select(func.count(Alert.id)).where(
+                and_(Alert.alert_type == AlertType.SHORTAGE_RISK, Alert.acknowledged.is_(False))
+            )
+        )
+        or 0
+    )
 
     # Expiring soon (30 days)
-    expiring_soon_count = await db.scalar(
-        select(func.count(InventoryBatch.id))
-        .where(and_(
-            InventoryBatch.status == BatchStatus.AVAILABLE,
-            InventoryBatch.expiry_date <= func.current_date() + 30,
-            InventoryBatch.expiry_date >= func.current_date(),
-        ))
-    ) or 0
+    expiring_soon_count = (
+        await db.scalar(
+            select(func.count(InventoryBatch.id)).where(
+                and_(
+                    InventoryBatch.status == BatchStatus.AVAILABLE,
+                    InventoryBatch.expiry_date <= func.current_date() + 30,
+                    InventoryBatch.expiry_date >= func.current_date(),
+                )
+            )
+        )
+        or 0
+    )
 
     # Total inventory value
-    total_inventory_value = await db.scalar(
-        select(func.coalesce(func.sum(InventoryBatch.quantity * InventoryBatch.unit_cost), 0))
-        .where(InventoryBatch.status == BatchStatus.AVAILABLE)
-    ) or 0.0
+    total_inventory_value = (
+        await db.scalar(
+            select(
+                func.coalesce(func.sum(InventoryBatch.quantity * InventoryBatch.unit_cost), 0)
+            ).where(InventoryBatch.status == BatchStatus.AVAILABLE)
+        )
+        or 0.0
+    )
 
-    # Average MAPE
-    avg_mape = await db.scalar(
-        select(func.avg(Prediction.mape_score))
-        .where(Prediction.mape_score.isnot(None))
-    ) or 0.0
+    # Average WAPE (metrica principal de qualidade das previsoes)
+    avg_wape = (
+        await db.scalar(
+            select(func.avg(Prediction.wape_score)).where(Prediction.wape_score.isnot(None))
+        )
+        or 0.0
+    )
 
     # Predictions generated today
-    predictions_today = await db.scalar(
-        select(func.count(Prediction.id))
-        .where(func.date(Prediction.created_at) == func.current_date())
-    ) or 0
+    predictions_today = (
+        await db.scalar(
+            select(func.count(Prediction.id)).where(
+                func.date(Prediction.created_at) == func.current_date()
+            )
+        )
+        or 0
+    )
 
     # Unacknowledged alerts
-    alerts_unacknowledged = await db.scalar(
-        select(func.count(Alert.id))
-        .where(Alert.acknowledged == False)
-    ) or 0
+    alerts_unacknowledged = (
+        await db.scalar(select(func.count(Alert.id)).where(Alert.acknowledged.is_(False))) or 0
+    )
 
     return DashboardKPIs(
         total_skus=total_skus,
@@ -89,13 +130,15 @@ async def get_kpis(
         stockout_risk_count=stockout_risk_count,
         expiring_soon_count=expiring_soon_count,
         total_inventory_value=float(total_inventory_value),
-        average_mape=float(avg_mape),
+        average_wape=float(avg_wape),
         predictions_generated_today=predictions_today,
         alerts_unacknowledged=alerts_unacknowledged,
     )
 
 
-@router.get("/stockout-risk", response_model=list[StockoutRiskItem], summary="Get stockout risk items")
+@router.get(
+    '/stockout-risk', response_model=list[StockoutRiskItem], summary='Get stockout risk items'
+)
 async def get_stockout_risk(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
@@ -103,30 +146,63 @@ async def get_stockout_risk(
 ) -> list[StockoutRiskItem]:
     """Get stockout risk items using ML predictions when available."""
     from app.models import Prediction
-    
+
     # Try to get ML predictions first
     prediction_query = (
         select(
-            Product.id.label("product_id"),
-            Product.name.label("product_name"),
-            Product.sku.label("product_sku"),
-            func.coalesce(func.sum(InventoryBatch.quantity).filter(InventoryBatch.status == BatchStatus.AVAILABLE), 0).label("current_stock"),
-            Prediction.predicted_quantity.label("predicted_7d"),
+            Product.id.label('product_id'),
+            Product.name.label('product_name'),
+            Product.sku.label('product_sku'),
+            func.coalesce(
+                func.sum(InventoryBatch.quantity).filter(
+                    InventoryBatch.status == BatchStatus.AVAILABLE
+                ),
+                0,
+            ).label('current_stock'),
+            Prediction.predicted_quantity.label('predicted_7d'),
             Prediction.confidence_lower,
             Prediction.confidence_upper,
         )
-        .outerjoin(InventoryBatch, and_(Product.id == InventoryBatch.product_id, InventoryBatch.status != BatchStatus.RECALLED))
+        .outerjoin(
+            InventoryBatch,
+            and_(
+                Product.id == InventoryBatch.product_id,
+                InventoryBatch.status != BatchStatus.RECALLED,
+            ),
+        )
         .outerjoin(Prediction, Product.id == Prediction.product_id)
-        .where(Product.is_active == True)
-        .group_by(Product.id, Product.name, Product.sku, Prediction.predicted_quantity, Prediction.confidence_lower, Prediction.confidence_upper)
-        .having(func.coalesce(func.sum(InventoryBatch.quantity).filter(InventoryBatch.status == BatchStatus.AVAILABLE), 0) <= Product.max_stock_level)
-        .order_by(func.coalesce(func.sum(InventoryBatch.quantity).filter(InventoryBatch.status == BatchStatus.AVAILABLE), 0).asc())
+        .where(Product.is_active.is_(True))
+        .group_by(
+            Product.id,
+            Product.name,
+            Product.sku,
+            Prediction.predicted_quantity,
+            Prediction.confidence_lower,
+            Prediction.confidence_upper,
+        )
+        .having(
+            func.coalesce(
+                func.sum(InventoryBatch.quantity).filter(
+                    InventoryBatch.status == BatchStatus.AVAILABLE
+                ),
+                0,
+            )
+            <= Product.max_stock_level
+        )
+        .order_by(
+            func.coalesce(
+                func.sum(InventoryBatch.quantity).filter(
+                    InventoryBatch.status == BatchStatus.AVAILABLE
+                ),
+                0,
+            ).asc()
+        )
         .limit(limit)
     )
-    
+
     result = await db.execute(prediction_query)
     rows = result.all()
-    
+
     items = []
     for row in rows:
         current_stock = row.current_stock
@@ -145,34 +221,40 @@ async def get_stockout_risk(
             fallback_result = await db.execute(fallback_query)
             daily_avg = float(fallback_result.scalar() or 40.0)
             predicted_7d = int(daily_avg * 7)
-        
-        days_until_stockout = int(current_stock / daily_avg) if daily_avg > 0 else None
-        
-        if days_until_stockout is not None and days_until_stockout <= 3:
-            risk_level = "critical"
-        elif days_until_stockout is not None and days_until_stockout <= 7:
-            risk_level = "high"
-        elif days_until_stockout is not None and days_until_stockout <= 14:
-            risk_level = "medium"
-        else:
-            risk_level = "low"
 
-        items.append(StockoutRiskItem(
-            product_id=row.product_id,
-            product_name=row.product_name,
-            product_sku=row.product_sku,
-            current_stock=row.current_stock,
-            predicted_consumption_7d=int(predicted_7d),
-            predicted_consumption_30d=int(predicted_7d * 30 / 7),
-            days_until_stockout=days_until_stockout,
-            risk_level=risk_level,
-            recommended_order_qty=max(0, int(daily_avg * 14) - row.current_stock),  # 14 days of stock
-        ))
+        days_until_stockout = int(current_stock / daily_avg) if daily_avg > 0 else None
+
+        if days_until_stockout is not None and days_until_stockout <= 3:
+            risk_level = 'critical'
+        elif days_until_stockout is not None and days_until_stockout <= 7:
+            risk_level = 'high'
+        elif days_until_stockout is not None and days_until_stockout <= 14:
+            risk_level = 'medium'
+        else:
+            risk_level = 'low'
+
+        items.append(
+            StockoutRiskItem(
+                product_id=row.product_id,
+                product_name=row.product_name,
+                product_sku=row.product_sku,
+                current_stock=row.current_stock,
+                predicted_consumption_7d=int(predicted_7d),
+                predicted_consumption_30d=int(predicted_7d * 30 / 7),
+                days_until_stockout=days_until_stockout,
+                risk_level=risk_level,
+                recommended_order_qty=max(
+                    0, int(daily_avg * 14) - row.current_stock
+                ),  # 14 days of stock
+            )
+        )
 
     return items
 
 
-@router.get("/expiry-timeline", response_model=list[ExpiryTimelineItem], summary="Get expiry timeline")
+@router.get(
+    '/expiry-timeline', response_model=list[ExpiryTimelineItem], summary='Get expiry timeline'
+)
 async def get_expiry_timeline(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
@@ -181,21 +263,23 @@ async def get_expiry_timeline(
 ) -> list[ExpiryTimelineItem]:
     query = (
         select(
-            InventoryBatch.id.label("batch_id"),
-            Product.id.label("product_id"),
-            Product.name.label("product_name"),
-            Product.sku.label("product_sku"),
+            InventoryBatch.id.label('batch_id'),
+            Product.id.label('product_id'),
+            Product.name.label('product_name'),
+            Product.sku.label('product_sku'),
             InventoryBatch.batch_number,
             InventoryBatch.quantity,
             InventoryBatch.expiry_date,
             InventoryBatch.status,
         )
         .join(Product, InventoryBatch.product_id == Product.id)
-        .where(and_(
-            InventoryBatch.status == BatchStatus.AVAILABLE,
-            InventoryBatch.expiry_date <= func.current_date() + days_ahead,
-            InventoryBatch.expiry_date >= func.current_date(),
-        ))
+        .where(
+            and_(
+                InventoryBatch.status == BatchStatus.AVAILABLE,
+                InventoryBatch.expiry_date <= func.current_date() + days_ahead,
+                InventoryBatch.expiry_date >= func.current_date(),
+            )
+        )
         .order_by(InventoryBatch.expiry_date.asc())
         .limit(limit)
     )
@@ -206,22 +290,28 @@ async def get_expiry_timeline(
     items = []
     for row in rows:
         days_until = (row.expiry_date - date.today()).days
-        items.append(ExpiryTimelineItem(
-            batch_id=row.batch_id,
-            product_id=row.product_id,
-            product_name=row.product_name,
-            product_sku=row.product_sku,
-            batch_number=row.batch_number,
-            quantity=row.quantity,
-            expiry_date=row.expiry_date,
-            days_until_expiry=days_until,
-            status=row.status,
-        ))
+        items.append(
+            ExpiryTimelineItem(
+                batch_id=row.batch_id,
+                product_id=row.product_id,
+                product_name=row.product_name,
+                product_sku=row.product_sku,
+                batch_number=row.batch_number,
+                quantity=row.quantity,
+                expiry_date=row.expiry_date,
+                days_until_expiry=days_until,
+                status=row.status,
+            )
+        )
 
     return items
 
 
-@router.get("/consumption-trends", response_model=list[ConsumptionTrendPoint], summary="Get consumption trends")
+@router.get(
+    '/consumption-trends',
+    response_model=list[ConsumptionTrendPoint],
+    summary='Get consumption trends',
+)
 async def get_consumption_trends(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
@@ -229,25 +319,26 @@ async def get_consumption_trends(
     department: Department | None = None,
 ) -> list[ConsumptionTrendPoint]:
     from datetime import timedelta
-    
+
     start_date = date.today() - timedelta(days=days_back)
-    
-    query = (
-        select(
-            Consumption.consumption_date,
-            func.sum(Consumption.quantity).label("total_quantity"),
-        )
-        .where(and_(
+
+    query = select(
+        Consumption.consumption_date,
+        func.sum(Consumption.quantity).label('total_quantity'),
+    ).where(
+        and_(
             Consumption.consumption_date >= start_date,
             Consumption.consumption_date <= date.today(),
-        ))
+        )
     )
-    
+
     if department:
         query = query.where(Consumption.department == department)
-    
-    query = query.group_by(Consumption.consumption_date).order_by(Consumption.consumption_date.asc())
-    
+
+    query = query.group_by(Consumption.consumption_date).order_by(
+        Consumption.consumption_date.asc()
+    )
+
     result = await db.execute(query)
     rows = result.all()
 
@@ -271,23 +362,25 @@ async def get_consumption_trends(
         cat_result = await db.execute(cat_query)
         by_cat = {str(r.category): r[1] for r in cat_result.all()}
 
-        trends.append(ConsumptionTrendPoint(
-            date=row.consumption_date,
-            total_quantity=row.total_quantity,
-            by_department=by_dept,
-            by_category=by_cat,
-        ))
+        trends.append(
+            ConsumptionTrendPoint(
+                date=row.consumption_date,
+                total_quantity=row.total_quantity,
+                by_department=by_dept,
+                by_category=by_cat,
+            )
+        )
 
     return trends
 
 
-@router.get("", response_model=DashboardResponse, summary="Get full dashboard data")
+@router.get('', response_model=DashboardResponse, summary='Get full dashboard data')
 async def get_dashboard(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> DashboardResponse:
     from datetime import datetime
-    
+
     kpis = await get_kpis(db, current_user)
     stockout_risks = await get_stockout_risk(db, current_user)
     expiry_timeline = await get_expiry_timeline(db, current_user)

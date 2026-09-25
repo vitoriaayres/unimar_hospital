@@ -124,6 +124,7 @@ export interface Prediction {
   confidence_upper: number;
   model_version: string;
   mape_score: number | null;
+  wape_score: number | null;
   created_at: string;
 }
 
@@ -141,6 +142,7 @@ export interface ForecastResponse {
 export interface ModelComparison {
   model_version: string;
   model_type: string;
+  wape: number;
   mape: number;
   rmse: number;
   mae: number;
@@ -174,7 +176,7 @@ export interface DashboardKPIs {
   stockout_risk_count: number;
   expiring_soon_count: number;
   total_inventory_value: number;
-  average_mape: number;
+  average_wape: number;
   predictions_generated_today: number;
   alerts_unacknowledged: number;
 }

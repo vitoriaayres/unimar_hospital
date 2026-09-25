@@ -9,7 +9,7 @@ export interface DashboardKPIs {
   stockout_risk_count: number;
   expiring_soon_count: number;
   total_inventory_value: number;
-  average_mape: number;
+  average_wape: number;
   predictions_generated_today: number;
   alerts_unacknowledged: number;
 }

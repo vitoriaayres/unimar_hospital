@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
@@ -13,12 +13,10 @@ from app.api.deps import get_current_user, get_db
 from app.config import settings
 from app.models import User, UserRole
 from app.schemas.auth import (
-    LoginRequest,
     PasswordChangeRequest,
     RefreshRequest,
     Token,
     UserCreate,
-    UserInDB,
     UserResponse,
     UserUpdate,
 )
@@ -34,7 +32,7 @@ from app.utils.security import (
 router = APIRouter()
 
 
-@router.post("/login", response_model=Token, summary="Login and get access/refresh tokens")
+@router.post('/login', response_model=Token, summary='Login and get access/refresh tokens')
 async def login(
     db: Annotated[AsyncSession, Depends(get_db)],
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
@@ -46,14 +44,14 @@ async def login(
     if not user or not verify_password(form_data.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password",
-            headers={"WWW-Authenticate": "Bearer"},
+            detail='Incorrect email or password',
+            headers={'WWW-Authenticate': 'Bearer'},
         )
 
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="User account is disabled",
+            detail='User account is disabled',
         )
 
     access_token = create_access_token(sub=user.id, email=user.email, role=user.role.value)
@@ -61,11 +59,11 @@ async def login(
 
     # Set refresh token as HttpOnly cookie
     response.set_cookie(
-        key="refresh_token",
+        key='refresh_token',
         value=refresh_token,
         httponly=True,
-        secure=settings.ENVIRONMENT == "production",
-        samesite="lax",
+        secure=settings.ENVIRONMENT == 'production',
+        samesite='lax',
         max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
     )
 
@@ -79,7 +77,7 @@ async def login(
     )
 
 
-@router.post("/refresh", response_model=Token, summary="Refresh access token")
+@router.post('/refresh', response_model=Token, summary='Refresh access token')
 async def refresh_token(
     db: Annotated[AsyncSession, Depends(get_db)],
     request: RefreshRequest,
@@ -87,12 +85,12 @@ async def refresh_token(
 ) -> Token:
     try:
         payload = decode_token(request.refresh_token)
-        if payload.type != "refresh":
-            raise AppException("INVALID_TOKEN", "Invalid token type", status_code=401)
-    except Exception as e:
+        if payload.type != 'refresh':
+            raise AppException('INVALID_TOKEN', 'Invalid token type', status_code=401)
+    except Exception:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired refresh token",
+            detail='Invalid or expired refresh token',
         )
 
     result = await db.execute(select(User).where(User.id == payload.sub))
@@ -101,18 +99,18 @@ async def refresh_token(
     if not user or not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found or inactive",
+            detail='User not found or inactive',
         )
 
     access_token = create_access_token(sub=user.id, email=user.email, role=user.role.value)
     new_refresh_token = create_refresh_token(sub=user.id)
 
     response.set_cookie(
-        key="refresh_token",
+        key='refresh_token',
         value=new_refresh_token,
         httponly=True,
-        secure=settings.ENVIRONMENT == "production",
-        samesite="lax",
+        secure=settings.ENVIRONMENT == 'production',
+        samesite='lax',
         max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
     )
 
@@ -123,18 +121,30 @@ async def refresh_token(
     )
 
 
-@router.post("/logout", summary="Logout and clear refresh token")
+@router.post('/logout', summary='Logout and clear refresh token')
 async def logout(response: Response) -> dict:
-    response.delete_cookie(key="refresh_token", httponly=True, secure=settings.ENVIRONMENT == "production", samesite="lax")
-    return {"message": "Successfully logged out"}
+    response.delete_cookie(
+        key='refresh_token',
+        httponly=True,
+        secure=settings.ENVIRONMENT == 'production',
+        samesite='lax',
+    )
+    return {'message': 'Successfully logged out'}
 
 
-@router.get("/me", response_model=UserResponse, summary="Get current user profile")
-async def get_current_user_profile(current_user: Annotated[User, Depends(get_current_user)]) -> UserResponse:
+@router.get('/me', response_model=UserResponse, summary='Get current user profile')
+async def get_current_user_profile(
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> UserResponse:
     return UserResponse.model_validate(current_user)
 
 
-@router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED, summary="Register new user (admin only)")
+@router.post(
+    '/register',
+    response_model=UserResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary='Register new user (admin only)',
+)
 async def register(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
@@ -143,14 +153,14 @@ async def register(
     if current_user.role != UserRole.ADMIN:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only administrators can create users",
+            detail='Only administrators can create users',
         )
 
     result = await db.execute(select(User).where(User.email == user_data.email))
     if result.scalar_one_or_none():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email already registered",
+            detail='Email already registered',
         )
 
     user = User(
@@ -166,7 +176,7 @@ async def register(
     return UserResponse.model_validate(user)
 
 
-@router.patch("/me/password", summary="Change current user password")
+@router.patch('/me/password', summary='Change current user password')
 async def change_password(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
@@ -175,16 +185,16 @@ async def change_password(
     if not verify_password(password_data.current_password, current_user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Current password is incorrect",
+            detail='Current password is incorrect',
         )
 
     current_user.hashed_password = get_password_hash(password_data.new_password)
     await db.commit()
 
-    return {"message": "Password changed successfully"}
+    return {'message': 'Password changed successfully'}
 
 
-@router.get("/users", response_model=list[UserResponse], summary="List all users (admin only)")
+@router.get('/users', response_model=list[UserResponse], summary='List all users (admin only)')
 async def list_users(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
@@ -194,7 +204,7 @@ async def list_users(
     if current_user.role != UserRole.ADMIN:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only administrators can list users",
+            detail='Only administrators can list users',
         )
 
     result = await db.execute(select(User).offset(skip).limit(limit))
@@ -202,7 +212,7 @@ async def list_users(
     return [UserResponse.model_validate(u) for u in users]
 
 
-@router.patch("/users/{user_id}", response_model=UserResponse, summary="Update user (admin only)")
+@router.patch('/users/{user_id}', response_model=UserResponse, summary='Update user (admin only)')
 async def update_user(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
@@ -212,7 +222,7 @@ async def update_user(
     if current_user.role != UserRole.ADMIN:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only administrators can update users",
+            detail='Only administrators can update users',
         )
 
     result = await db.execute(select(User).where(User.id == user_id))
@@ -221,7 +231,7 @@ async def update_user(
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found",
+            detail='User not found',
         )
 
     update_data = user_data.model_dump(exclude_unset=True)

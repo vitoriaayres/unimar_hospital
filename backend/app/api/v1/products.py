@@ -3,26 +3,34 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select, func, or_
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
 from app.models import Product, User, UserRole
-from app.schemas.product import ProductCreate, ProductListParams, ProductListResponse, ProductResponse, ProductUpdate
+from app.schemas.product import (
+    ProductCreate,
+    ProductListParams,
+    ProductListResponse,
+    ProductResponse,
+    ProductUpdate,
+)
 
-router = APIRouter(prefix="/products")
+router = APIRouter(prefix='/products')
 
 
 def _check_manager_or_admin(user: User) -> None:
     if user.role not in (UserRole.MANAGER, UserRole.ADMIN):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only managers and administrators can perform this action",
+            detail='Only managers and administrators can perform this action',
         )
 
 
-@router.get("", response_model=ProductListResponse, summary="List products with pagination and filters")
+@router.get(
+    '', response_model=ProductListResponse, summary='List products with pagination and filters'
+)
 async def list_products(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
@@ -33,9 +41,9 @@ async def list_products(
     if params.search:
         query = query.where(
             or_(
-                Product.name.ilike(f"%{params.search}%"),
-                Product.sku.ilike(f"%{params.search}%"),
-                Product.generic_name.ilike(f"%{params.search}%"),
+                Product.name.ilike(f'%{params.search}%'),
+                Product.sku.ilike(f'%{params.search}%'),
+                Product.generic_name.ilike(f'%{params.search}%'),
             )
         )
 
@@ -54,7 +62,7 @@ async def list_products(
 
     # Apply sorting
     sort_column = getattr(Product, params.sort_by, Product.name)
-    if params.sort_order == "desc":
+    if params.sort_order == 'desc':
         query = query.order_by(sort_column.desc())
     else:
         query = query.order_by(sort_column.asc())
@@ -75,7 +83,12 @@ async def list_products(
     )
 
 
-@router.post("", response_model=ProductResponse, status_code=status.HTTP_201_CREATED, summary="Create new product")
+@router.post(
+    '',
+    response_model=ProductResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary='Create new product',
+)
 async def create_product(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
@@ -87,7 +100,7 @@ async def create_product(
     if result.scalar_one_or_none():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Product with this SKU already exists",
+            detail='Product with this SKU already exists',
         )
 
     product = Product(**product_data.model_dump())
@@ -98,25 +111,27 @@ async def create_product(
     return ProductResponse.model_validate(product)
 
 
-@router.get("/{product_id}", response_model=ProductResponse, summary="Get product by ID")
+@router.get('/{product_id}', response_model=ProductResponse, summary='Get product by ID')
 async def get_product(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
     product_id: UUID,
 ) -> ProductResponse:
-    result = await db.execute(select(Product).where(Product.id == product_id))
+    result = await db.execute(
+        select(Product).where(Product.id == product_id, Product.is_active.is_(True))
+    )
     product = result.scalar_one_or_none()
 
     if not product:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Product not found",
+            detail='Product not found',
         )
 
     return ProductResponse.model_validate(product)
 
 
-@router.patch("/{product_id}", response_model=ProductResponse, summary="Update product")
+@router.patch('/{product_id}', response_model=ProductResponse, summary='Update product')
 async def update_product(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
@@ -131,7 +146,7 @@ async def update_product(
     if not product:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Product not found",
+            detail='Product not found',
         )
 
     update_data = product_data.model_dump(exclude_unset=True)
@@ -144,7 +159,9 @@ async def update_product(
     return ProductResponse.model_validate(product)
 
 
-@router.delete("/{product_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Delete product (soft delete)")
+@router.delete(
+    '/{product_id}', status_code=status.HTTP_204_NO_CONTENT, summary='Delete product (soft delete)'
+)
 async def delete_product(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
@@ -153,7 +170,7 @@ async def delete_product(
     if current_user.role != UserRole.ADMIN:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only administrators can delete products",
+            detail='Only administrators can delete products',
         )
 
     result = await db.execute(select(Product).where(Product.id == product_id))
@@ -162,7 +179,7 @@ async def delete_product(
     if not product:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Product not found",
+            detail='Product not found',
         )
 
     product.is_active = False

@@ -9,10 +9,20 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class ReportBase(BaseModel):
     name: str = Field(min_length=1, max_length=100)
-    report_type: Literal['stock_position', 'expiry_analysis', 'consumption_trends', 'forecast_accuracy', 'alert_summary', 'custom']
+    report_type: Literal[
+        'stock_position',
+        'expiry_analysis',
+        'consumption_trends',
+        'forecast_accuracy',
+        'alert_summary',
+        'custom',
+    ]
     format: Literal['pdf', 'excel'] = 'pdf'
     filters: dict = Field(default_factory=dict)
-    schedule_cron: str | None = Field(default=None, pattern=r'^(\*|([0-9]|1[0-9]|2[0-9]|3[0-9]|4[0-9]|5[0-9])|\*/[0-9]+) (\*|([0-9]|1[0-9]|2[0-3])|\*/[0-9]+) (\*|([1-9]|1[0-9]|2[0-9]|3[0-1])|\*/[0-9]+) (\*|([1-9]|1[0-2])|\*/[0-9]+) (\*|([0-6])|\*/[0-9]+)$')
+    schedule_cron: str | None = Field(
+        default=None,
+        pattern=r'^(\*|([0-9]|1[0-9]|2[0-9]|3[0-9]|4[0-9]|5[0-9])|\*/[0-9]+) (\*|([0-9]|1[0-9]|2[0-3])|\*/[0-9]+) (\*|([1-9]|1[0-9]|2[0-9]|3[0-1])|\*/[0-9]+) (\*|([1-9]|1[0-2])|\*/[0-9]+) (\*|([0-6])|\*/[0-9]+)$',
+    )
 
 
 class ReportCreate(ReportBase):
@@ -21,10 +31,23 @@ class ReportCreate(ReportBase):
 
 class ReportUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=100)
-    report_type: Literal['stock_position', 'expiry_analysis', 'consumption_trends', 'forecast_accuracy', 'alert_summary', 'custom'] | None = None
+    report_type: (
+        Literal[
+            'stock_position',
+            'expiry_analysis',
+            'consumption_trends',
+            'forecast_accuracy',
+            'alert_summary',
+            'custom',
+        ]
+        | None
+    ) = None
     format: Literal['pdf', 'excel'] | None = None
     filters: dict | None = None
-    schedule_cron: str | None = Field(default=None, pattern=r'^(\*|([0-9]|1[0-9]|2[0-9]|3[0-9]|4[0-9]|5[0-9])|\*/[0-9]+) (\*|([0-9]|1[0-9]|2[0-3])|\*/[0-9]+) (\*|([1-9]|1[0-9]|2[0-9]|3[0-1])|\*/[0-9]+) (\*|([1-9]|1[0-2])|\*/[0-9]+) (\*|([0-6])|\*/[0-9]+)$')
+    schedule_cron: str | None = Field(
+        default=None,
+        pattern=r'^(\*|([0-9]|1[0-9]|2[0-9]|3[0-9]|4[0-9]|5[0-9])|\*/[0-9]+) (\*|([0-9]|1[0-9]|2[0-3])|\*/[0-9]+) (\*|([1-9]|1[0-9]|2[0-9]|3[0-1])|\*/[0-9]+) (\*|([1-9]|1[0-2])|\*/[0-9]+) (\*|([0-6])|\*/[0-9]+)$',
+    )
     is_active: bool | None = None
 
 

@@ -66,7 +66,7 @@ export default function PredictionsPage() {
     if (!selectedProductId) return;
     try {
       await generateMutation.mutateAsync({
-        product_ids: [selectedProductId],
+        product_id: selectedProductId,
         horizon_days: horizonDays,
         model_version: modelVersion || undefined,
       });
@@ -197,8 +197,8 @@ export default function PredictionsPage() {
                   <SelectContent>
                     <SelectItem value="">Todos os modelos</SelectItem>
                     {models?.map((m) => (
-                      <SelectItem key={m.version} value={m.version}>
-                        {m.name} (v{m.version}) - MAPE: {m.mape.toFixed(1)}%
+                      <SelectItem key={m.model_version} value={m.model_version}>
+                        {m.model_type} (v{m.model_version}) - WAPE: {(m.wape * 100).toFixed(1)}%
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -255,7 +255,7 @@ export default function PredictionsPage() {
                           <TableHead className="text-right">IC Inferior</TableHead>
                           <TableHead className="text-right">IC Superior</TableHead>
                           <TableHead>Modelo</TableHead>
-                          <TableHead className="text-right">MAPE</TableHead>
+                          <TableHead className="text-right">WAPE</TableHead>
                           <TableHead>Criado em</TableHead>
                         </TableRow>
                       </TableHeader>
@@ -278,12 +278,12 @@ export default function PredictionsPage() {
                               </Badge>
                             </TableCell>
                             <TableCell className="text-right">
-                              {pred.mape_score !== null ? (
+                              {pred.wape_score !== null ? (
                                 <span className={cn(
                                   'font-medium',
-                                  pred.mape_score < 10 ? 'text-green-600' : pred.mape_score < 15 ? 'text-amber-600' : 'text-destructive'
+                                  pred.wape_score < 0.1 ? 'text-green-600' : pred.wape_score < 0.15 ? 'text-amber-600' : 'text-destructive'
                                 )}>
-                                  {pred.mape_score.toFixed(1)}%
+                                  {(pred.wape_score * 100).toFixed(1)}%
                                 </span>
                               ) : (
                                 <span className="text-muted-foreground">—</span>
@@ -389,7 +389,7 @@ export default function PredictionsPage() {
                               <TableHead>Modelo</TableHead>
                               <TableHead className="text-right">Média Prevista (30d)</TableHead>
                               <TableHead className="text-right">Total Previsto (30d)</TableHead>
-                              <TableHead className="text-right">MAPE Médio</TableHead>
+                              <TableHead className="text-right">WAPE Médio</TableHead>
                               <TableHead>Última Atualização</TableHead>
                             </TableRow>
                           </TableHeader>
@@ -404,7 +404,7 @@ export default function PredictionsPage() {
                                 model,
                                 avgPredicted: preds.reduce((s, p) => s + p.predicted_quantity, 0) / preds.length,
                                 totalPredicted: preds.reduce((s, p) => s + p.predicted_quantity, 0),
-                                avgMape: preds.filter(p => p.mape_score !== null).reduce((s, p) => s + (p.mape_score || 0), 0) / Math.max(1, preds.filter(p => p.mape_score !== null).length),
+                                avgWape: (preds.filter(p => p.wape_score !== null).reduce((s, p) => s + (p.wape_score || 0), 0) / Math.max(1, preds.filter(p => p.wape_score !== null).length)) * 100,
                                 lastUpdate: Math.max(...preds.map(p => new Date(p.created_at).getTime())),
                               }));
                             }, [selectedProductId]).map((row) => (
@@ -415,12 +415,12 @@ export default function PredictionsPage() {
                                 <TableCell className="text-right">{row.avgPredicted.toFixed(1)}</TableCell>
                                 <TableCell className="text-right">{formatNumber(row.totalPredicted)}</TableCell>
                                 <TableCell className="text-right">
-                                  {row.avgMape > 0 ? (
+                                  {row.avgWape > 0 ? (
                                     <span className={cn(
                                       'font-medium',
-                                      row.avgMape < 10 ? 'text-green-600' : row.avgMape < 15 ? 'text-amber-600' : 'text-destructive'
+                                      row.avgWape < 10 ? 'text-green-600' : row.avgWape < 15 ? 'text-amber-600' : 'text-destructive'
                                     )}>
-                                      {row.avgMape.toFixed(1)}%
+                                      {row.avgWape.toFixed(1)}%
                                     </span>
                                   ) : (
                                     <span className="text-muted-foreground">—</span>
@@ -462,30 +462,30 @@ export default function PredictionsPage() {
               ) : (
                 <div className="space-y-4">
                   {models?.map((model) => (
-                    <div key={model.version} className="flex items-center justify-between p-4 rounded-lg border">
+                    <div key={model.model_version} className="flex items-center justify-between p-4 rounded-lg border">
                       <div className="flex items-center gap-4">
                         <div className="p-3 rounded-lg bg-primary/10">
                           <Brain className="h-6 w-6 text-primary" />
                         </div>
                         <div>
-                          <p className="font-medium">{model.name}</p>
+                          <p className="font-medium">{model.model_type}</p>
                           <p className="text-sm text-muted-foreground">
-                            v{model.version} • {model.algorithm} • {model.is_active ? 'Ativo' : 'Inativo'}
+                            v{model.model_version} • {model.is_production ? 'Ativo' : 'Inativo'}
                           </p>
                         </div>
                       </div>
                       <div className="flex items-center gap-4">
                         <div className="text-right">
-                          <p className="text-sm text-muted-foreground">MAPE</p>
+                          <p className="text-sm text-muted-foreground">WAPE</p>
                           <p className={cn(
                             'font-bold',
-                            model.mape < 10 ? 'text-green-600' : model.mape < 15 ? 'text-amber-600' : 'text-destructive'
+                            model.wape * 100 < 10 ? 'text-green-600' : model.wape * 100 < 15 ? 'text-amber-600' : 'text-destructive'
                           )}>
-                            {model.mape.toFixed(1)}%
+                            {(model.wape * 100).toFixed(1)}%
                           </p>
                         </div>
-                        <Badge variant={model.is_active ? 'success' : 'secondary'} className="text-xs">
-                          {model.is_active ? 'Produção' : 'Homologação'}
+                        <Badge variant={model.is_production ? 'success' : 'secondary'} className="text-xs">
+                          {model.is_production ? 'Produção' : 'Homologação'}
                         </Badge>
                       </div>
                     </div>
@@ -541,8 +541,8 @@ export default function PredictionsPage() {
                   <SelectContent>
                     <SelectItem value="">Auto (melhor modelo)</SelectItem>
                     {models?.map((m) => (
-                      <SelectItem key={m.version} value={m.version}>
-                        {m.name} (v{m.version})
+                      <SelectItem key={m.model_version} value={m.model_version}>
+                        {m.model_type} (v{m.model_version})
                       </SelectItem>
                     ))}
                   </SelectContent>

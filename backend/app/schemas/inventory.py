@@ -13,7 +13,7 @@ class InventoryBatchBase(BaseModel):
     quantity: int = Field(ge=0)
     expiry_date: date
     manufacture_date: date | None = None
-    unit_cost: Decimal = Field(default=Decimal("0.00"), ge=0, decimal_places=2)
+    unit_cost: Decimal = Field(default=Decimal('0.00'), ge=0, decimal_places=2)
 
 
 class InventoryBatchCreate(InventoryBatchBase):
@@ -26,7 +26,7 @@ class InventoryBatchUpdate(BaseModel):
     expiry_date: date | None = None
     manufacture_date: date | None = None
     unit_cost: Decimal | None = Field(default=None, ge=0, decimal_places=2)
-    status: Literal["available", "reserved", "expired", "recalled", "quarantine"] | None = None
+    status: Literal['available', 'reserved', 'expired', 'recalled', 'quarantine'] | None = None
 
 
 class InventoryBatchResponse(InventoryBatchBase):
@@ -35,7 +35,7 @@ class InventoryBatchResponse(InventoryBatchBase):
     id: UUID
     product_id: UUID
     warehouse_id: UUID
-    status: Literal["available", "reserved", "expired", "recalled", "quarantine"]
+    status: Literal['available', 'reserved', 'expired', 'recalled', 'quarantine']
     received_at: datetime
     created_at: datetime
     updated_at: datetime
@@ -46,7 +46,7 @@ class InventoryBatchResponse(InventoryBatchBase):
 
 class StockMovementBase(BaseModel):
     quantity_change: int
-    movement_type: Literal["in", "out", "adjustment", "transfer", "loss", "expired", "recalled"]
+    movement_type: Literal['in', 'out', 'adjustment', 'transfer', 'loss', 'expired', 'recalled']
     reference_type: str | None = Field(default=None, max_length=50)
     reference_id: UUID | None = None
     notes: str | None = None

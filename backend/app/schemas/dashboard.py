@@ -4,7 +4,7 @@ from datetime import date
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 
 class DashboardKPIs(BaseModel):
@@ -13,7 +13,7 @@ class DashboardKPIs(BaseModel):
     stockout_risk_count: int = Field(ge=0)
     expiring_soon_count: int = Field(ge=0)
     total_inventory_value: float = Field(ge=0)
-    average_mape: float = Field(ge=0, le=1)
+    average_wape: float = Field(ge=0, le=1)
     predictions_generated_today: int = Field(ge=0)
     alerts_unacknowledged: int = Field(ge=0)
 

@@ -12,6 +12,7 @@ export interface Prediction {
   confidence_upper: number;
   model_version: string;
   mape_score: number | null;
+  wape_score: number | null;
   created_at: string;
   product?: {
     id: string;
@@ -41,12 +42,34 @@ export interface PredictionListResponse {
 }
 
 export interface ModelInfo {
-  version: string;
-  name: string;
-  algorithm: string;
+  model_version: string;
+  model_type: string;
+  wape: number;
   mape: number;
-  created_at: string;
-  is_active: boolean;
+  rmse: number;
+  mae: number;
+  smape: number;
+  coverage: number;
+  interval_width: number;
+  training_date: string;
+  is_production: boolean;
+  is_staging: boolean;
+}
+
+export interface ForecastResponse {
+  product_id: string;
+  product_name: string;
+  product_sku: string;
+  model_version: string;
+  horizon_days: number;
+  generated_at: string;
+  predictions: {
+    forecast_date: string;
+    predicted_quantity: number;
+    confidence_lower: number;
+    confidence_upper: number;
+  }[];
+  summary: Record<string, number>;
 }
 
 async function fetchPredictions(params: PredictionListParams = {}): Promise<PredictionListResponse> {
@@ -59,8 +82,8 @@ async function fetchModels(): Promise<ModelInfo[]> {
   return response.data;
 }
 
-async function generateForecast(data: { product_ids: string[]; horizon_days: number; model_version?: string }): Promise<Prediction[]> {
-  const response = await api.post<Prediction[]>('/predictions/forecast', data);
+async function generateForecast(data: { product_id: string; horizon_days: number; model_version?: string }): Promise<ForecastResponse> {
+  const response = await api.post<ForecastResponse>('/predictions/forecast', data);
   return response.data;
 }
 

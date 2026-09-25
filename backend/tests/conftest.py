@@ -6,15 +6,14 @@ import asyncio
 from collections.abc import AsyncGenerator, Generator
 from datetime import date, datetime, timedelta
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
-import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-from app.config import settings
+from app.api.deps import get_db as api_get_db
 from app.database import Base, get_db
 from app.main import create_app
 from app.models import (
@@ -25,23 +24,20 @@ from app.models import (
     Consumption,
     Department,
     InventoryBatch,
-    MovementType,
     PrescriptionType,
     Product,
     ProductCategory,
-    StockMovement,
     User,
     UserRole,
     Warehouse,
 )
 from app.utils.security import get_password_hash
 
-
 # Test database URL (SQLite in memory for speed)
-TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
+TEST_DATABASE_URL = 'sqlite+aiosqlite:///:memory:'
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope='session')
 def event_loop() -> Generator[asyncio.AbstractEventLoop, None, None]:
     """Create event loop for async tests."""
     loop = asyncio.get_event_loop_policy().new_event_loop()
@@ -49,14 +45,14 @@ def event_loop() -> Generator[asyncio.AbstractEventLoop, None, None]:
     loop.close()
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 async def test_engine():
-    """Create test database engine."""
+    """Create test database engine (fresh in-memory DB per test)."""
     engine = create_async_engine(
         TEST_DATABASE_URL,
         echo=False,
         poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
+        connect_args={'check_same_thread': False},
     )
 
     async with engine.begin() as conn:
@@ -89,11 +85,14 @@ async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
     async def override_get_db() -> AsyncGenerator[AsyncSession, None]:
         yield db_session
 
+    # As rotas importam get_db de app.api.deps; app.database.get_db fica como
+    # rede de seguranca para qualquer outro ponto que o importe diretamente.
+    app.dependency_overrides[api_get_db] = override_get_db
     app.dependency_overrides[get_db] = override_get_db
 
     async with AsyncClient(
         transport=ASGITransport(app=app),
-        base_url="http://test",
+        base_url='http://test',
     ) as ac:
         yield ac
 
@@ -104,13 +103,14 @@ async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
 # Test Data Factories
 # =============================================================================
 
+
 @pytest.fixture
 def sample_user_data() -> dict[str, Any]:
     return {
-        "email": "test@hospital.gov.br",
-        "password": "TestPass123",
-        "full_name": "Test User",
-        "role": "pharmacist",
+        'email': 'test@hospital.gov.br',
+        'password': 'TestPass123',
+        'full_name': 'Test User',
+        'role': 'pharmacist',
     }
 
 
@@ -118,10 +118,10 @@ def sample_user_data() -> dict[str, Any]:
 async def test_user(db_session: AsyncSession, sample_user_data: dict) -> User:
     user = User(
         id=uuid4(),
-        email=sample_user_data["email"],
-        hashed_password=get_password_hash(sample_user_data["password"]),
-        full_name=sample_user_data["full_name"],
-        role=UserRole(sample_user_data["role"]),
+        email=sample_user_data['email'],
+        hashed_password=get_password_hash(sample_user_data['password']),
+        full_name=sample_user_data['full_name'],
+        role=UserRole(sample_user_data['role']),
         is_active=True,
     )
     db_session.add(user)
@@ -134,9 +134,9 @@ async def test_user(db_session: AsyncSession, sample_user_data: dict) -> User:
 async def admin_user(db_session: AsyncSession) -> User:
     user = User(
         id=uuid4(),
-        email="admin@test.com",
-        hashed_password=get_password_hash("AdminPass123"),
-        full_name="Admin User",
+        email='admin@test.com',
+        hashed_password=get_password_hash('AdminPass123'),
+        full_name='Admin User',
         role=UserRole.ADMIN,
         is_active=True,
     )
@@ -150,9 +150,9 @@ async def admin_user(db_session: AsyncSession) -> User:
 async def manager_user(db_session: AsyncSession) -> User:
     user = User(
         id=uuid4(),
-        email="manager@test.com",
-        hashed_password=get_password_hash("ManagerPass123"),
-        full_name="Manager User",
+        email='manager@test.com',
+        hashed_password=get_password_hash('ManagerPass123'),
+        full_name='Manager User',
         role=UserRole.MANAGER,
         is_active=True,
     )
@@ -171,7 +171,7 @@ def auth_headers(test_user: User) -> dict[str, str]:
         email=test_user.email,
         role=test_user.role.value,
     )
-    return {"Authorization": f"Bearer {token}"}
+    return {'Authorization': f'Bearer {token}'}
 
 
 @pytest.fixture
@@ -183,15 +183,15 @@ def admin_auth_headers(admin_user: User) -> dict[str, str]:
         email=admin_user.email,
         role=admin_user.role.value,
     )
-    return {"Authorization": f"Bearer {token}"}
+    return {'Authorization': f'Bearer {token}'}
 
 
 @pytest.fixture
 async def test_warehouse(db_session: AsyncSession) -> Warehouse:
     warehouse = Warehouse(
         id=uuid4(),
-        name="Almoxarifado Central",
-        location="Térreo - Bloco A",
+        name='Almoxarifado Central',
+        location='Térreo - Bloco A',
         is_primary=True,
     )
     db_session.add(warehouse)
@@ -204,19 +204,19 @@ async def test_warehouse(db_session: AsyncSession) -> Warehouse:
 async def test_product(db_session: AsyncSession) -> Product:
     product = Product(
         id=uuid4(),
-        sku="MED-001",
-        name="Dipirona 500mg Comprimido",
-        generic_name="Dipirona",
+        sku='MED-001',
+        name='Dipirona 500mg Comprimido',
+        generic_name='Dipirona',
         category=ProductCategory.ANALGESIC,
-        atc_code="N02BB02",
-        unit="mg",
+        atc_code='N02BB02',
+        unit='mg',
         unit_cost=2.50,
         min_stock_level=100,
         max_stock_level=1000,
         lead_time_days=7,
         controlled_substance=False,
         is_active=True,
-        metadata={"base_demand_per_day": 45.0},
+        metadata={'base_demand_per_day': 45.0},
     )
     db_session.add(product)
     await db_session.commit()
@@ -225,12 +225,14 @@ async def test_product(db_session: AsyncSession) -> Product:
 
 
 @pytest.fixture
-async def test_batch(db_session: AsyncSession, test_product: Product, test_warehouse: Warehouse) -> InventoryBatch:
+async def test_batch(
+    db_session: AsyncSession, test_product: Product, test_warehouse: Warehouse
+) -> InventoryBatch:
     batch = InventoryBatch(
         id=uuid4(),
         product_id=test_product.id,
         warehouse_id=test_warehouse.id,
-        batch_number="L202401001",
+        batch_number='L202401001',
         quantity=500,
         expiry_date=date.today() + timedelta(days=365),
         manufacture_date=date.today() - timedelta(days=30),
@@ -252,7 +254,7 @@ async def test_consumption(db_session: AsyncSession, test_product: Product) -> C
         quantity=50,
         department=Department.WARD,
         prescription_type=PrescriptionType.ROUTINE,
-        context={"seasonal_multiplier": 1.0},
+        context={'seasonal_multiplier': 1.0},
     )
     db_session.add(consumption)
     await db_session.commit()
@@ -267,8 +269,8 @@ async def test_alert(db_session: AsyncSession, test_product: Product) -> Alert:
         product_id=test_product.id,
         alert_type=AlertType.SHORTAGE_RISK,
         severity=AlertSeverity.WARNING,
-        message="Estoque baixo previsto para 5 dias",
-        metadata={"days_until_stockout": 5, "recommended_order_qty": 200},
+        message='Estoque baixo previsto para 5 dias',
+        metadata={'days_until_stockout': 5, 'recommended_order_qty': 200},
     )
     db_session.add(alert)
     await db_session.commit()
@@ -280,9 +282,12 @@ async def test_alert(db_session: AsyncSession, test_product: Product) -> Alert:
 # Test Utilities
 # =============================================================================
 
+
 def assert_response_ok(response, expected_status: int = 200):
     """Assert response is successful."""
-    assert response.status_code == expected_status, f"Expected {expected_status}, got {response.status_code}: {response.text}"
+    assert response.status_code == expected_status, (
+        f'Expected {expected_status}, got {response.status_code}: {response.text}'
+    )
 
 
 def assert_response_error(response, expected_status: int, error_code: str | None = None):
@@ -290,12 +295,12 @@ def assert_response_error(response, expected_status: int, error_code: str | None
     assert response.status_code == expected_status
     if error_code:
         data = response.json()
-        assert data.get("error") == error_code
+        assert data.get('error') == error_code
 
 
 def parse_datetime(dt_str: str) -> datetime:
     """Parse ISO datetime string."""
-    return datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
+    return datetime.fromisoformat(dt_str.replace('Z', '+00:00'))
 
 
 def parse_date(date_str: str) -> date:

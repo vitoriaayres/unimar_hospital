@@ -29,7 +29,7 @@ const kpiConfig = [
   { key: 'stockout_risk_count', name: 'Risco de Falta', icon: TrendingUp, color: 'text-destructive bg-destructive/10', formatter: (v: number) => v.toLocaleString('pt-BR') },
   { key: 'expiring_soon_count', name: 'Vencendo (30d)', icon: Clock, color: 'text-purple-600 bg-purple-100', formatter: (v: number) => v.toLocaleString('pt-BR') },
   { key: 'total_inventory_value', name: 'Valor Total Estoque', icon: DollarSign, color: 'text-green-600 bg-green-100', formatter: (v: number) => `R$ ${(v / 1e6).toFixed(1)}M` },
-  { key: 'average_mape', name: 'Precisão Média (MAPE)', icon: Target, color: 'text-indigo-600 bg-indigo-100', formatter: (v: number) => `${(v * 100).toFixed(1)}%` },
+  { key: 'average_wape', name: 'Precisão Média (WAPE)', icon: Target, color: 'text-indigo-600 bg-indigo-100', formatter: (v: number) => `${(v * 100).toFixed(1)}%` },
 ];
 
 function getRiskBadgeVariant(risk: string) {

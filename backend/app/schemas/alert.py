@@ -12,7 +12,7 @@ class AlertBase(BaseModel):
     alert_type: Literal['shortage_risk', 'expiry_risk', 'overstock', 'reorder_point']
     severity: Literal['info', 'warning', 'critical']
     message: str
-    metadata: dict = Field(default_factory=dict, alias="alert_metadata")
+    metadata: dict = Field(default_factory=dict, alias='alert_metadata')
 
 
 class AlertCreate(AlertBase):

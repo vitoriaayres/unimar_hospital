@@ -22,6 +22,7 @@ class PredictionBase(BaseModel):
     confidence_upper: int = Field(ge=0)
     model_version: str = Field(min_length=1, max_length=100)
     mape_score: float | None = Field(default=None, ge=0, le=1)
+    wape_score: float | None = Field(default=None, ge=0, le=1)
 
 
 class PredictionCreate(PredictionBase):
@@ -42,6 +43,8 @@ class PredictionListParams(BaseModel):
     model_version: str | None = None
     start_date: date | None = None
     end_date: date | None = None
+    sort_by: str = Field(default='forecast_date')
+    sort_order: Literal['asc', 'desc'] = 'desc'
 
 
 class PredictionListResponse(BaseModel):
@@ -72,6 +75,7 @@ class ForecastResponse(BaseModel):
 class ModelComparison(BaseModel):
     model_version: str
     model_type: str
+    wape: float
     mape: float
     rmse: float
     mae: float

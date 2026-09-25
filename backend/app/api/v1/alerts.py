@@ -3,34 +3,54 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select, func
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_manager
-from app.models import Alert, Product, User, AlertType, AlertSeverity
+from app.models import Alert, User
 from app.schemas.alert import (
-    AlertListParams,
-    AlertResponse,
     AlertAcknowledgeRequest,
     AlertBulkAcknowledgeRequest,
+    AlertListParams,
+    AlertResponse,
     AlertRuleResponse,
     AlertRuleUpdate,
 )
 
-router = APIRouter(prefix="/alerts")
+router = APIRouter(prefix='/alerts')
 
 
 # Mock alert rules storage (in production, this would be in DB)
 _alert_rules = {
-    "shortage_risk": {"enabled": True, "threshold_days": 7, "severity": "warning", "notify_roles": ["pharmacist", "manager"]},
-    "expiry_risk": {"enabled": True, "threshold_days": 90, "severity": "warning", "notify_roles": ["pharmacist", "manager"]},
-    "overstock": {"enabled": True, "threshold_days": 0, "severity": "info", "notify_roles": ["manager"]},
-    "reorder_point": {"enabled": True, "threshold_days": 0, "severity": "info", "notify_roles": ["pharmacist"]},
+    'shortage_risk': {
+        'enabled': True,
+        'threshold_days': 7,
+        'severity': 'warning',
+        'notify_roles': ['pharmacist', 'manager'],
+    },
+    'expiry_risk': {
+        'enabled': True,
+        'threshold_days': 90,
+        'severity': 'warning',
+        'notify_roles': ['pharmacist', 'manager'],
+    },
+    'overstock': {
+        'enabled': True,
+        'threshold_days': 0,
+        'severity': 'info',
+        'notify_roles': ['manager'],
+    },
+    'reorder_point': {
+        'enabled': True,
+        'threshold_days': 0,
+        'severity': 'info',
+        'notify_roles': ['pharmacist'],
+    },
 }
 
 
-@router.get("", response_model=list[AlertResponse], summary="List alerts")
+@router.get('', response_model=list[AlertResponse], summary='List alerts')
 async def list_alerts(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
@@ -58,7 +78,7 @@ async def list_alerts(
 
     # Apply sorting
     sort_column = getattr(Alert, params.sort_by, Alert.created_at)
-    if params.sort_order == "desc":
+    if params.sort_order == 'desc':
         query = query.order_by(sort_column.desc())
     else:
         query = query.order_by(sort_column.asc())
@@ -71,7 +91,7 @@ async def list_alerts(
     return [AlertResponse.model_validate(a) for a in alerts]
 
 
-@router.post("/{alert_id}/acknowledge", response_model=AlertResponse, summary="Acknowledge alert")
+@router.post('/{alert_id}/acknowledge', response_model=AlertResponse, summary='Acknowledge alert')
 async def acknowledge_alert(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
@@ -84,13 +104,14 @@ async def acknowledge_alert(
     if not alert:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Alert not found",
+            detail='Alert not found',
         )
 
     if ack_data.acknowledged:
         alert.acknowledged = True
         alert.acknowledged_by = current_user.id
         from datetime import datetime
+
         alert.acknowledged_at = datetime.utcnow()
     else:
         alert.acknowledged = False
@@ -103,7 +124,9 @@ async def acknowledge_alert(
     return AlertResponse.model_validate(alert)
 
 
-@router.post("/bulk-acknowledge", response_model=list[AlertResponse], summary="Bulk acknowledge alerts")
+@router.post(
+    '/bulk-acknowledge', response_model=list[AlertResponse], summary='Bulk acknowledge alerts'
+)
 async def bulk_acknowledge_alerts(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
@@ -113,6 +136,7 @@ async def bulk_acknowledge_alerts(
     alerts = result.scalars().all()
 
     from datetime import datetime
+
     for alert in alerts:
         alert.acknowledged = True
         alert.acknowledged_by = current_user.id
@@ -125,26 +149,28 @@ async def bulk_acknowledge_alerts(
     return [AlertResponse.model_validate(a) for a in alerts]
 
 
-@router.get("/rules", response_model=list[AlertRuleResponse], summary="Get alert rules")
+@router.get('/rules', response_model=list[AlertRuleResponse], summary='Get alert rules')
 async def list_alert_rules(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> list[AlertRuleResponse]:
     rules = []
     for alert_type, config in _alert_rules.items():
-        rules.append(AlertRuleResponse(
-            id=alert_type,
-            alert_type=alert_type,
-            enabled=config["enabled"],
-            threshold_days=config["threshold_days"],
-            severity=config["severity"],
-            notify_roles=config["notify_roles"],
-            created_at="2024-01-01T00:00:00",
-            updated_at="2024-01-01T00:00:00",
-        ))
+        rules.append(
+            AlertRuleResponse(
+                id=alert_type,
+                alert_type=alert_type,
+                enabled=config['enabled'],
+                threshold_days=config['threshold_days'],
+                severity=config['severity'],
+                notify_roles=config['notify_roles'],
+                created_at='2024-01-01T00:00:00',
+                updated_at='2024-01-01T00:00:00',
+            )
+        )
     return rules
 
 
-@router.patch("/rules", response_model=list[AlertRuleResponse], summary="Update alert rules")
+@router.patch('/rules', response_model=list[AlertRuleResponse], summary='Update alert rules')
 async def update_alert_rules(
     current_user: Annotated[User, Depends(require_manager)],
     rules_update: AlertRuleUpdate,
@@ -153,14 +179,16 @@ async def update_alert_rules(
     # For now, just return the current rules
     rules = []
     for alert_type, config in _alert_rules.items():
-        rules.append(AlertRuleResponse(
-            id=alert_type,
-            alert_type=alert_type,
-            enabled=config["enabled"],
-            threshold_days=config["threshold_days"],
-            severity=config["severity"],
-            notify_roles=config["notify_roles"],
-            created_at="2024-01-01T00:00:00",
-            updated_at="2024-01-01T00:00:00",
-        ))
+        rules.append(
+            AlertRuleResponse(
+                id=alert_type,
+                alert_type=alert_type,
+                enabled=config['enabled'],
+                threshold_days=config['threshold_days'],
+                severity=config['severity'],
+                notify_roles=config['notify_roles'],
+                created_at='2024-01-01T00:00:00',
+                updated_at='2024-01-01T00:00:00',
+            )
+        )
     return rules

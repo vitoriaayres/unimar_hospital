@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -35,7 +35,7 @@ class Database:
             pool_timeout=settings.DB_POOL_TIMEOUT,
             pool_pre_ping=True,
             echo=settings.DB_ECHO,
-            poolclass=NullPool if settings.ENVIRONMENT == "test" else None,
+            poolclass=NullPool if settings.ENVIRONMENT == 'test' else None,
         )
 
         self._session_factory = async_sessionmaker(
@@ -48,6 +48,7 @@ class Database:
     def disconnect(self) -> None:
         if self._engine is not None:
             import asyncio
+
             asyncio.run(self._engine.dispose())
             self._engine = None
             self._session_factory = None
@@ -95,7 +96,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 async def init_db() -> None:
     database.connect()
-    if settings.ENVIRONMENT == "development":
+    if settings.ENVIRONMENT == 'development':
         await database.create_all()
 
 

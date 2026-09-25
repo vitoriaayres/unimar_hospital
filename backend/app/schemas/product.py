@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from datetime import date, datetime
-from decimal import Decimal
+from datetime import datetime
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ProductBase(BaseModel):
@@ -13,17 +13,31 @@ class ProductBase(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     generic_name: str | None = Field(default=None, max_length=255)
     category: Literal[
-        "antibiotic", "analgesic", "antithrombotic", "beta_blocker",
-        "ppi", "bronchodilator", "psycholeptic", "ace_inhibitor",
-        "corticosteroid", "other"
-    ] = "other"
+        'antibiotic',
+        'analgesic',
+        'antithrombotic',
+        'beta_blocker',
+        'ppi',
+        'bronchodilator',
+        'psycholeptic',
+        'ace_inhibitor',
+        'corticosteroid',
+        'other',
+    ] = 'other'
     atc_code: str | None = Field(default=None, max_length=20)
-    unit: str = Field(default="un", max_length=20)
-    unit_cost: Decimal = Field(default=Decimal("0.00"), ge=0, decimal_places=2)
+    unit: str = Field(default='un', max_length=20)
+    unit_cost: Decimal = Field(default=Decimal('0.00'), ge=0, decimal_places=2)
     min_stock_level: int = Field(default=0, ge=0)
     max_stock_level: int = Field(default=100, ge=0)
     lead_time_days: int = Field(default=7, ge=0)
     controlled_substance: bool = False
+
+    @field_validator('unit_cost', mode='before')
+    @classmethod
+    def _quantize_unit_cost(cls, value: object) -> object:
+        if value is None:
+            return value
+        return Decimal(str(value)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
 
 class ProductCreate(ProductBase):
@@ -33,11 +47,21 @@ class ProductCreate(ProductBase):
 class ProductUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     generic_name: str | None = Field(default=None, max_length=255)
-    category: Literal[
-        "antibiotic", "analgesic", "antithrombotic", "beta_blocker",
-        "ppi", "bronchodilator", "psycholeptic", "ace_inhibitor",
-        "corticosteroid", "other"
-    ] | None = None
+    category: (
+        Literal[
+            'antibiotic',
+            'analgesic',
+            'antithrombotic',
+            'beta_blocker',
+            'ppi',
+            'bronchodilator',
+            'psycholeptic',
+            'ace_inhibitor',
+            'corticosteroid',
+            'other',
+        ]
+        | None
+    ) = None
     atc_code: str | None = Field(default=None, max_length=20)
     unit: str | None = Field(default=None, max_length=20)
     unit_cost: Decimal | None = Field(default=None, ge=0, decimal_places=2)
@@ -53,7 +77,7 @@ class ProductResponse(ProductBase):
 
     id: UUID
     is_active: bool
-    metadata: dict = Field(alias="product_metadata")
+    metadata: dict = Field(alias='product_metadata')
     created_at: datetime
     updated_at: datetime
 
@@ -65,8 +89,8 @@ class ProductListParams(BaseModel):
     category: str | None = None
     controlled_substance: bool | None = None
     is_active: bool | None = True
-    sort_by: str = Field(default="name")
-    sort_order: Literal["asc", "desc"] = "asc"
+    sort_by: str = Field(default='name')
+    sort_order: Literal['asc', 'desc'] = 'asc'
 
 
 class ProductListResponse(BaseModel):

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from typing import Annotated, AsyncGenerator
-from uuid import UUID
+from collections.abc import AsyncGenerator
+from typing import Annotated
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
@@ -14,7 +14,7 @@ from app.models import User
 from app.utils.exceptions import AppException
 from app.utils.security import decode_token
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_PREFIX}/auth/login", auto_error=False)
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f'{settings.API_PREFIX}/login', auto_error=False)
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
@@ -28,13 +28,13 @@ async def get_current_user(
 ) -> User:
     try:
         payload = decode_token(token)
-        if payload.type != "access":
-            raise AppException("INVALID_TOKEN", "Invalid token type")
-    except Exception as e:
+        if payload.type != 'access':
+            raise AppException('INVALID_TOKEN', 'Invalid token type')
+    except Exception:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token",
-            headers={"WWW-Authenticate": "Bearer"},
+            detail='Invalid or expired token',
+            headers={'WWW-Authenticate': 'Bearer'},
         )
 
     result = await db.execute(select(User).where(User.id == payload.sub))
@@ -43,13 +43,13 @@ async def get_current_user(
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found",
+            detail='User not found',
         )
 
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="User account is disabled",
+            detail='User account is disabled',
         )
 
     return user
@@ -61,7 +61,7 @@ async def get_current_active_user(
     if not current_user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Inactive user",
+            detail='Inactive user',
         )
     return current_user
 
@@ -71,11 +71,12 @@ def require_role(*roles: str):
         if current_user.role.value not in roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Insufficient permissions",
+                detail='Insufficient permissions',
             )
         return current_user
+
     return role_checker
 
 
-require_manager = require_role("manager", "admin")
-require_admin = require_role("admin")
+require_manager = require_role('manager', 'admin')
+require_admin = require_role('admin')
