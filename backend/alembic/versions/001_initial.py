@@ -118,8 +118,15 @@ def upgrade() -> None:
             nullable=False,
         ),
     )
-    # op.create_index('ix_warehouses_primary', 'warehouses', ['is_primary'], unique=True)  # unique=True on column
 
+    op.create_index(
+    'ix_warehouses_primary',
+    'warehouses',
+    ['is_primary'],
+    unique=True,
+    postgresql_where=sa.text('is_primary = true'),
+)
+    
     # Create products table
     op.create_table(
         'products',

@@ -25,7 +25,7 @@ from ml.features import (
     load_inventory,
     load_products,
 )
-from ml.inference import BLEND_WEIGHT, predict_demand
+from ml.inference import BLEND_WEIGHT, predict_demand, to_feature_frame
 
 MODEL_DIR = Path('ml/models')
 DATA_DIR = Path('ml/data')
@@ -72,7 +72,7 @@ def predict_all(
     """Gera previsão para todos os produtos (último dia disponível)."""
     latest = features.sort('consumption_date', descending=True).group_by('product_id').first()
 
-    X = latest.select(feature_cols).to_pandas()
+    X = to_feature_frame(latest, feature_cols)
     preds = predict_demand(model, X, blend_weight)
 
     result = latest.select(
@@ -96,7 +96,7 @@ def predict_single(
         return None
 
     last_row = product_data.sort('consumption_date', descending=True).head(1)
-    X = last_row.select(feature_cols).to_pandas()
+    X = to_feature_frame(last_row, feature_cols)
     pred = float(predict_demand(model, X, load_blend_weight())[0])
 
     return {
@@ -222,19 +222,19 @@ def main() -> None:
     except Exception as e:
         print(f'   Erro ao salvar no banco: {e}')
 
-    preds_pandas = predictions.to_pandas()
+    pred_7d = predictions['predicted_consumption_7d']
     print('\n=== Estatisticas ===')
-    print(f'   Produtos previstos: {len(preds_pandas)}')
-    base_date = preds_pandas['consumption_date'].max()
+    print(f'   Produtos previstos: {len(predictions)}')
+    base_date = predictions['consumption_date'].max()
     print(f'   Janela prevista: D+1 a D+7 a partir de {base_date}')
-    print(f'   Media 7d:    {preds_pandas["predicted_consumption_7d"].mean():.1f}')
-    print(f'   Mediana 7d:  {preds_pandas["predicted_consumption_7d"].median():.1f}')
-    print(f'   Maximo 7d:   {preds_pandas["predicted_consumption_7d"].max():.1f}')
-    print(f'   Minimo 7d:   {preds_pandas["predicted_consumption_7d"].min():.1f}')
+    print(f'   Media 7d:    {pred_7d.mean():.1f}')
+    print(f'   Mediana 7d:  {pred_7d.median():.1f}')
+    print(f'   Maximo 7d:   {pred_7d.max():.1f}')
+    print(f'   Minimo 7d:   {pred_7d.min():.1f}')
 
     print('\n=== Top 10 Maior Demanda Prevista ===')
-    top10 = preds_pandas.nlargest(10, 'predicted_consumption_7d')
-    for _, row in top10.iterrows():
+    top10 = predictions.sort('predicted_consumption_7d', descending=True).head(10)
+    for row in top10.iter_rows(named=True):
         print(
             f'   {row["product_id"][:8]}...  consumoAtual={row["daily_consumption"]:>6.0f}  prev7d={row["predicted_consumption_7d"]:>8.1f}'
         )

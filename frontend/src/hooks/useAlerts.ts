@@ -42,13 +42,11 @@ export interface AlertListResponse {
 
 export interface AlertRule {
   id: string;
-  name: string;
-  alert_type: string;
-  severity: string;
-  threshold_value: number;
-  threshold_unit: string;
+  alert_type: 'shortage_risk' | 'expiry_risk' | 'overstock' | 'reorder_point';
   enabled: boolean;
-  description: string | null;
+  threshold_days: number; // 0 = regra sem prazo
+  severity: 'info' | 'warning' | 'critical';
+  notify_roles: string[];
   created_at: string;
   updated_at: string;
 }
@@ -58,13 +56,8 @@ async function fetchAlerts(params: AlertListParams = {}): Promise<AlertListRespo
   return response.data;
 }
 
-async function fetchAlert(id: string): Promise<Alert> {
-  const response = await api.get<Alert>(`/alerts/${id}`);
-  return response.data;
-}
-
 async function acknowledgeAlert(id: string): Promise<Alert> {
-  const response = await api.post<Alert>(`/alerts/${id}/acknowledge`);
+  const response = await api.post<Alert>(`/alerts/${id}/acknowledge`, { acknowledged: true });
   return response.data;
 }
 
@@ -92,21 +85,17 @@ export function useAlerts(params: AlertListParams = {}) {
   });
 }
 
-export function useAlert(id: string) {
-  return useQuery<Alert>({
-    queryKey: ['alerts', id],
-    queryFn: () => fetchAlert(id),
-    enabled: !!id,
-  });
+// Contagens de alertas aparecem no dashboard e no sino do cabeçalho
+function invalidateAlertQueries(queryClient: ReturnType<typeof useQueryClient>) {
+  queryClient.invalidateQueries({ queryKey: ['alerts'] });
+  queryClient.invalidateQueries({ queryKey: ['dashboard'] });
 }
 
 export function useAcknowledgeAlert() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: acknowledgeAlert,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['alerts'] });
-    },
+    onSuccess: () => invalidateAlertQueries(queryClient),
   });
 }
 
@@ -114,9 +103,16 @@ export function useBulkAcknowledgeAlerts() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: bulkAcknowledgeAlerts,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['alerts'] });
-    },
+    onSuccess: () => invalidateAlertQueries(queryClient),
+  });
+}
+
+/** Total de alertas para um filtro (usa só o campo total da paginação). */
+export function useAlertCount(params: Omit<AlertListParams, 'page' | 'size'>) {
+  return useQuery<number>({
+    queryKey: ['alerts', 'count', params],
+    queryFn: async () => (await fetchAlerts({ ...params, page: 1, size: 1 })).total,
+    refetchInterval: 30000,
   });
 }
 

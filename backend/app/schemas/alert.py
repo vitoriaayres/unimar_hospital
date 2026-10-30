@@ -19,6 +19,17 @@ class AlertCreate(AlertBase):
     pass
 
 
+class AlertProductRef(BaseModel):
+    """Subconjunto do produto aninhado na resposta de alerta."""
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    sku: str
+    name: str
+    generic_name: str | None = None
+    category: str
+
+
 class AlertResponse(AlertBase):
     model_config = ConfigDict(from_attributes=True)
 
@@ -27,6 +38,15 @@ class AlertResponse(AlertBase):
     acknowledged_by: UUID | None
     acknowledged_at: datetime | None
     created_at: datetime
+    product: AlertProductRef | None = None
+
+
+class AlertListResponse(BaseModel):
+    items: list[AlertResponse]
+    total: int
+    page: int
+    size: int
+    pages: int
 
 
 class AlertAcknowledgeRequest(BaseModel):
@@ -53,7 +73,7 @@ class AlertListParams(BaseModel):
 class AlertRuleBase(BaseModel):
     alert_type: Literal['shortage_risk', 'expiry_risk', 'overstock', 'reorder_point']
     enabled: bool = True
-    threshold_days: int = Field(default=7, ge=1, le=90)
+    threshold_days: int = Field(default=7, ge=0, le=90)  # 0 = regra sem prazo
     severity: Literal['info', 'warning', 'critical'] = 'warning'
     notify_roles: list[Literal['pharmacist', 'manager', 'admin']] = Field(default_factory=list)
 
@@ -64,7 +84,7 @@ class AlertRuleCreate(AlertRuleBase):
 
 class AlertRuleUpdate(BaseModel):
     enabled: bool | None = None
-    threshold_days: int | None = Field(default=None, ge=1, le=90)
+    threshold_days: int | None = Field(default=None, ge=0, le=90)
     severity: Literal['info', 'warning', 'critical'] | None = None
     notify_roles: list[Literal['pharmacist', 'manager', 'admin']] | None = None
 
@@ -72,6 +92,6 @@ class AlertRuleUpdate(BaseModel):
 class AlertRuleResponse(AlertRuleBase):
     model_config = ConfigDict(from_attributes=True)
 
-    id: UUID
+    id: str  # ← ERA UUID (bug); agora é str porque usamos slugs ("shortage_risk")
     created_at: datetime
     updated_at: datetime

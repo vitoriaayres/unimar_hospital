@@ -12,6 +12,7 @@ export interface User {
 export interface Product {
   id: string;
   sku: string;
+  barcode: string | null;
   name: string;
   generic_name: string | null;
   category: ProductCategory;

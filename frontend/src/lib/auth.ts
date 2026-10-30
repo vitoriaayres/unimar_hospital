@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { apiEndpoints } from './api';
 
-interface User {
+export interface User {
   id: string;
   email: string;
   full_name: string;

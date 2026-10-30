@@ -12,6 +12,9 @@ from pathlib import Path
 import polars as pl
 import psycopg2
 
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from ml.barcodes import assign_barcodes  # noqa: E402
+
 DATA_DIR = Path('ml/data/synthetic')
 DB_URL = 'postgresql://pharmapredict:pharmapredict_dev@localhost:5432/pharmapredict'
 NOW = datetime.now(UTC).isoformat()
@@ -374,6 +377,8 @@ def main():
         'UPDATE users SET hashed_password = %s WHERE email = %s', (pwd, 'admin@hospital.gov.br')
     )
     print('  admin@hospital.gov.br / admin123')
+
+    print(f'  Codigos de barras: {assign_barcodes(cur)}')
 
     conn.commit()
     print('\nStep 4: Verifying...')

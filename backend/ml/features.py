@@ -91,10 +91,16 @@ def _get_connection():
 
 
 def load_consumption() -> pl.DataFrame:
+    """Consumo diário por produto, já somado no banco.
+
+    A tabela tem ~4 milhões de linhas (produto x dia x departamento); somar no
+    Postgres devolve ~1 milhão e evita estourar a memória da máquina.
+    """
     conn = _get_connection()
     df = pl.read_database(
-        'SELECT id, product_id, consumption_date, quantity, '
-        'department, prescription_type, context FROM consumption '
+        'SELECT product_id::text AS product_id, consumption_date, '
+        'SUM(quantity)::bigint AS quantity FROM consumption '
+        'GROUP BY product_id, consumption_date '
         'ORDER BY product_id, consumption_date',
         conn,
     )
@@ -258,17 +264,18 @@ def add_anomaly_features(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def add_target(df: pl.DataFrame, horizon_days: int = 7) -> pl.DataFrame:
-    """Target: consumo total nos próximos N dias (D+1 até D+N)."""
     df = df.sort(['product_id', 'consumption_date'])
-    return df.with_columns(
-        pl.col('daily_consumption')
-        .shift(-1)
-        .over('product_id')
-        .rolling_sum(window_size=horizon_days, min_samples=horizon_days)
-        .over('product_id')
-        .alias(f'target_{horizon_days}d')
-    )
+    col = f'target_{horizon_days}d'
 
+    shifted = [
+        pl.col('daily_consumption').shift(-k).over('product_id')
+        for k in range(1, horizon_days + 1)
+    ]
+    any_null = pl.any_horizontal([s.is_null() for s in shifted])
+
+    return df.with_columns(
+        pl.when(any_null).then(None).otherwise(pl.sum_horizontal(shifted)).alias(col)
+    )
 
 def add_product_features(df: pl.DataFrame, products: pl.DataFrame) -> pl.DataFrame:
     """Features estáticas do produto (categoria, custo, lead time)."""

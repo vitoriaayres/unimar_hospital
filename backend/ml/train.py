@@ -30,7 +30,7 @@ from ml.features import (
     load_products,
     prepare_train_test,
 )
-from ml.inference import predict_demand
+from ml.inference import predict_demand, to_feature_frame
 
 MODEL_DIR = Path('ml/models')
 METRICS_DIR = Path('ml/data')
@@ -171,6 +171,79 @@ def save_model(model: lgb.Booster, metrics: dict, feature_cols: list[str]) -> Pa
     return model_path
 
 
+def build_report(
+    model: lgb.Booster,
+    feature_cols: list[str],
+    test: pl.DataFrame,
+    y_pred: np.ndarray,
+    baseline: np.ndarray,
+    metrics: dict,
+) -> dict:
+    """Dados para a tela "Modelo" e para os graficos do relatorio (ml/report.py)."""
+    scored = test.select('consumption_date', 'category', 'target_7d').with_columns(
+        pl.Series('predicted', np.asarray(y_pred, dtype=float)),
+        pl.Series('baseline', np.asarray(baseline, dtype=float)),
+    )
+
+    # Soma de todos os produtos por semana: real x previsto x baseline
+    weekly = (
+        scored.with_columns(pl.col('consumption_date').dt.truncate('1w').alias('week'))
+        .group_by('week')
+        .agg(
+            pl.col('target_7d').sum().alias('actual'),
+            pl.col('predicted').sum(),
+            pl.col('baseline').sum(),
+        )
+        .sort('week')
+    )
+
+    by_category = (
+        scored.group_by('category')
+        .agg(
+            ((pl.col('target_7d') - pl.col('predicted')).abs().sum() / pl.col('target_7d').sum())
+            .alias('wape'),
+            ((pl.col('target_7d') - pl.col('baseline')).abs().sum() / pl.col('target_7d').sum())
+            .alias('baseline_wape'),
+            pl.len().alias('n'),
+        )
+        .sort('wape')
+    )
+
+    importance = model.feature_importance(importance_type='gain')
+    total_gain = float(importance.sum()) or 1.0
+    top = sorted(zip(feature_cols, importance), key=lambda x: x[1], reverse=True)[:15]
+
+    return {
+        'metrics': metrics,
+        'test_period': {
+            'start': test['consumption_date'].min().isoformat(),
+            'end': test['consumption_date'].max().isoformat(),
+        },
+        'weekly': [
+            {
+                'week': row['week'].isoformat(),
+                'actual': round(float(row['actual']), 1),
+                'predicted': round(float(row['predicted']), 1),
+                'baseline': round(float(row['baseline']), 1),
+            }
+            for row in weekly.iter_rows(named=True)
+        ],
+        'by_category': [
+            {
+                'category': row['category'],
+                'wape': round(float(row['wape']), 6),
+                'baseline_wape': round(float(row['baseline_wape']), 6),
+                'n': int(row['n']),
+            }
+            for row in by_category.iter_rows(named=True)
+        ],
+        'feature_importance': [
+            {'feature': name, 'importance': round(float(gain) / total_gain, 6)}
+            for name, gain in top
+        ],
+    }
+
+
 def print_feature_importance(model: lgb.Booster, feature_cols: list[str], top_n: int = 15) -> None:
     """Imprime feature importance."""
     importance = model.feature_importance(importance_type='gain')
@@ -210,11 +283,11 @@ def main() -> None:
         f'({len(inner_train):,} treino / {len(valid):,} validacao)'
     )
 
-    X_train = inner_train.select(feature_cols).to_pandas()
+    X_train = to_feature_frame(inner_train, feature_cols)
     y_train = inner_train.select('target_7d').to_numpy().ravel()
-    X_valid = valid.select(feature_cols).to_pandas()
+    X_valid = to_feature_frame(valid, feature_cols)
     y_valid = valid.select('target_7d').to_numpy().ravel()
-    X_test = test.select(feature_cols).to_pandas()
+    X_test = to_feature_frame(test, feature_cols)
     y_test = test.select('target_7d').to_numpy().ravel()
 
     print(f'  X_train: {X_train.shape}, y_train: {y_train.shape}')
@@ -274,6 +347,12 @@ def main() -> None:
 
     print('\n6. Salvando modelo...')
     save_model(model, metrics, feature_cols)
+
+    report = build_report(model, feature_cols, test, y_pred, baseline, metrics)
+    report_path = METRICS_DIR / 'model_report_production.json'
+    with open(report_path, 'w', encoding='utf-8') as f:
+        json.dump(report, f, indent=2, ensure_ascii=False)
+    print(f'  Relatorio:        {report_path}')
 
     print_feature_importance(model, feature_cols)
 

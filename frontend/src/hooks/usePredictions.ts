@@ -27,10 +27,12 @@ export interface PredictionListParams {
   page?: number;
   size?: number;
   product_id?: string;
+  search?: string;
   model_version?: string;
-  horizon_days?: number;
   start_date?: string;
   end_date?: string;
+  sort_by?: 'forecast_date' | 'predicted_quantity' | 'created_at';
+  sort_order?: 'asc' | 'desc';
 }
 
 export interface PredictionListResponse {
@@ -119,4 +121,41 @@ export function formatPredictionDate(date: string): string {
     month: '2-digit',
     year: 'numeric',
   }).format(new Date(date));
+}
+export interface ModelReport {
+  metrics: {
+    wape: number;
+    mape: number;
+    smape: number;
+    rmse: number;
+    mae: number;
+    baseline_wape: number;
+    baseline_mape: number;
+    wape_low: number;
+    wape_mid: number;
+    wape_high: number;
+    blend_weight: number;
+    n_features: number;
+    n_train: number;
+    n_valid: number;
+    n_test: number;
+    best_iteration: number;
+    trained_at: string;
+  };
+  test_period: { start: string; end: string };
+  weekly: Array<{ week: string; actual: number; predicted: number; baseline: number }>;
+  by_category: Array<{ category: string; wape: number; baseline_wape: number; n: number }>;
+  feature_importance: Array<{ feature: string; importance: number }>;
+}
+
+async function fetchModelReport(): Promise<ModelReport> {
+  const response = await api.get<ModelReport>('/predictions/model-report');
+  return response.data;
+}
+
+export function useModelReport() {
+  return useQuery<ModelReport>({
+    queryKey: ['predictions', 'model-report'],
+    queryFn: fetchModelReport,
+  });
 }

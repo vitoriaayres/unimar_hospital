@@ -7,6 +7,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.api.deps import get_current_user, get_db
 from app.models import (
@@ -20,6 +21,7 @@ from app.models import (
 )
 from app.schemas.inventory import (
     InventoryBatchCreate,
+    InventoryBatchListResponse,
     InventoryBatchResponse,
     InventoryBatchUpdate,
     InventorySummary,
@@ -158,7 +160,9 @@ async def get_inventory_summary(
 
 
 @router.get(
-    '/batches', response_model=list[InventoryBatchResponse], summary='List inventory batches'
+    '/batches',
+    response_model=InventoryBatchListResponse,
+    summary='List inventory batches (paginated)',
 )
 async def list_batches(
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -166,34 +170,56 @@ async def list_batches(
     product_id: UUID | None = None,
     status: BatchStatus | None = None,
     expiring_within_days: int | None = Query(default=None, ge=1, le=365),
-    skip: int = 0,
-    limit: int = 100,
-) -> list[InventoryBatchResponse]:
-    query = select(InventoryBatch).where(InventoryBatch.status != BatchStatus.RECALLED)
+    search: str | None = Query(default=None, max_length=100),
+    in_stock: bool = Query(default=False, description='Only batches with quantity > 0'),
+    page: int = Query(default=1, ge=1),
+    size: int = Query(default=100, ge=1, le=200),
+) -> InventoryBatchListResponse:
+    from sqlalchemy import func, or_
 
-    if product_id:
-        query = query.where(InventoryBatch.product_id == product_id)
+    query = select(InventoryBatch).options(selectinload(InventoryBatch.product)).where(InventoryBatch.status != BatchStatus.RECALLED)
 
-    if status:
-        query = query.where(InventoryBatch.status == status)
-
-    if expiring_within_days:
-        from datetime import date, timedelta
-
-        expiry_limit = date.today() + timedelta(days=expiring_within_days)
-        query = query.where(
-            and_(
-                InventoryBatch.expiry_date <= expiry_limit,
-                InventoryBatch.expiry_date >= date.today(),
+    if search:
+        pattern = f'%{search}%'
+        query = query.join(Product, InventoryBatch.product_id == Product.id).where(
+            or_(
+                InventoryBatch.batch_number.ilike(pattern),
+                Product.name.ilike(pattern),
+                Product.sku.ilike(pattern),
             )
         )
+    if in_stock:
+        query = query.where(InventoryBatch.quantity > 0)
+    if product_id:
+        query = query.where(InventoryBatch.product_id == product_id)
+    if status:
+        query = query.where(InventoryBatch.status == status)
+    if expiring_within_days:
+        from datetime import date, timedelta
+        expiry_limit = date.today() + timedelta(days=expiring_within_days)
+        query = query.where(
+            and_(InventoryBatch.expiry_date <= expiry_limit, InventoryBatch.expiry_date >= date.today())
+        )
 
-    query = query.order_by(InventoryBatch.expiry_date.asc()).offset(skip).limit(limit)
+    count_query = select(func.count()).select_from(query.subquery())
+    total = await db.scalar(count_query) or 0
+
+    query = (
+        query.order_by(InventoryBatch.expiry_date.asc())
+        .offset((page - 1) * size)
+        .limit(size)
+    )
     result = await db.execute(query)
     batches = result.scalars().all()
 
-    return [InventoryBatchResponse.model_validate(b) for b in batches]
-
+    pages = (total + size - 1) // size if size else 0
+    return InventoryBatchListResponse(
+        items=[InventoryBatchResponse.model_validate(b) for b in batches],
+        total=total,
+        page=page,
+        size=size,
+        pages=pages,
+    )
 
 @router.post(
     '/batches',
@@ -332,6 +358,7 @@ async def list_movements(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
     batch_id: UUID | None = None,
+    product_id: UUID | None = None,
     movement_type: MovementType | None = None,
     start_date: date | None = None,
     end_date: date | None = None,
@@ -340,6 +367,10 @@ async def list_movements(
 ) -> list[StockMovementResponse]:
     query = select(StockMovement).order_by(StockMovement.created_at.desc())
 
+    if product_id:
+        query = query.join(InventoryBatch, StockMovement.batch_id == InventoryBatch.id).where(
+            InventoryBatch.product_id == product_id
+        )
     if batch_id:
         query = query.where(StockMovement.batch_id == batch_id)
 

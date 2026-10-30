@@ -47,8 +47,8 @@ export interface InventoryListParams {
   size?: number;
   product_id?: string;
   status?: string;
-  expiry_before?: string;
-  expiry_after?: string;
+  expiring_within_days?: number;
+  in_stock?: boolean;
   search?: string;
 }
 
@@ -59,6 +59,27 @@ export interface InventoryListResponse {
   size: number;
   pages: number;
 }
+
+
+export interface InventorySummaryRow {
+  product_id: string;
+  product_name: string;
+  product_sku: string;
+  total_quantity: number;
+  available_quantity: number;
+  reserved_quantity: number;
+  expired_quantity: number;
+  batches_count: number;
+  batches_expiring_30d: number;
+  batches_expiring_90d: number;
+  total_value: number | string;   
+  min_stock_level: number;
+  max_stock_level: number;
+  days_of_supply: number | null;
+  is_low_stock: boolean;
+  is_overstock: boolean;
+}
+
 
 export interface InventorySummary {
   total_batches: number;
@@ -80,10 +101,6 @@ async function fetchInventoryBatch(id: string): Promise<InventoryBatch> {
   return response.data;
 }
 
-async function fetchInventorySummary(): Promise<InventorySummary> {
-  const response = await api.get<InventorySummary>('/inventory/summary');
-  return response.data;
-}
 
 async function fetchStockMovements(params: { batch_id?: string; page?: number; size?: number } = {}): Promise<{ items: StockMovement[]; total: number }> {
   const response = await api.get<{ items: StockMovement[]; total: number }>('/inventory/movements', { params });
@@ -121,7 +138,20 @@ export function useInventoryBatch(id: string) {
 export function useInventorySummary() {
   return useQuery<InventorySummary>({
     queryKey: ['inventory', 'summary'],
-    queryFn: fetchInventorySummary,
+    queryFn: async () => {
+      const response = await api.get<InventorySummaryRow[]>('/inventory/summary');
+      const rows = response.data;
+
+      return {
+        total_batches: rows.reduce((s, r) => s + r.batches_count, 0),
+        total_quantity: rows.reduce((s, r) => s + r.total_quantity, 0),
+        total_value: rows.reduce((s, r) => s + Number(r.total_value), 0),
+        expiring_30d: rows.reduce((s, r) => s + r.batches_expiring_30d, 0),
+        expiring_90d: rows.reduce((s, r) => s + r.batches_expiring_90d, 0),
+        expired_count: rows.reduce((s, r) => s + r.expired_quantity, 0),
+        low_stock_count: rows.filter((r) => r.is_low_stock).length,
+      };
+    },
     refetchInterval: 30000,
   });
 }

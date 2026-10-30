@@ -216,7 +216,7 @@ async def test_product(db_session: AsyncSession) -> Product:
         lead_time_days=7,
         controlled_substance=False,
         is_active=True,
-        metadata={'base_demand_per_day': 45.0},
+        product_metadata={'base_demand_per_day': 45.0},
     )
     db_session.add(product)
     await db_session.commit()
@@ -270,7 +270,7 @@ async def test_alert(db_session: AsyncSession, test_product: Product) -> Alert:
         alert_type=AlertType.SHORTAGE_RISK,
         severity=AlertSeverity.WARNING,
         message='Estoque baixo previsto para 5 dias',
-        metadata={'days_until_stockout': 5, 'recommended_order_qty': 200},
+       alert_metadata={'days_until_stockout': 5, 'recommended_order_qty': 200},
     )
     db_session.add(alert)
     await db_session.commit()

@@ -44,6 +44,7 @@ async def list_products(
                 Product.name.ilike(f'%{params.search}%'),
                 Product.sku.ilike(f'%{params.search}%'),
                 Product.generic_name.ilike(f'%{params.search}%'),
+                Product.barcode.ilike(f'%{params.search}%'),
             )
         )
 
@@ -103,10 +104,44 @@ async def create_product(
             detail='Product with this SKU already exists',
         )
 
+    if product_data.barcode:
+        result = await db.execute(select(Product).where(Product.barcode == product_data.barcode))
+        if result.scalar_one_or_none():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail='Product with this barcode already exists',
+            )
+
     product = Product(**product_data.model_dump())
     db.add(product)
     await db.commit()
     await db.refresh(product)
+
+    return ProductResponse.model_validate(product)
+
+
+@router.get(
+    '/by-barcode/{barcode}',
+    response_model=ProductResponse,
+    summary='Find product by barcode',
+)
+async def get_product_by_barcode(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    barcode: str,
+) -> ProductResponse:
+    barcode = barcode.strip()
+
+    result = await db.execute(
+        select(Product).where(Product.barcode == barcode, Product.is_active.is_(True))
+    )
+    product = result.scalar_one_or_none()
+
+    if not product:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail='Product with this barcode was not found',
+        )
 
     return ProductResponse.model_validate(product)
 

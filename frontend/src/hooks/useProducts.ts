@@ -6,6 +6,7 @@ import { api } from '@/lib/api';
 export interface Product {
   id: string;
   sku: string;
+  barcode: string | null;
   name: string;
   generic_name: string | null;
   category: string;
@@ -49,6 +50,11 @@ async function fetchProduct(id: string): Promise<Product> {
   return response.data;
 }
 
+async function fetchProductByBarcode(barcode: string): Promise<Product> {
+  const response = await api.get<Product>(`/products/by-barcode/${encodeURIComponent(barcode)}`);
+  return response.data;
+}
+
 async function createProduct(data: Partial<Product>): Promise<Product> {
   const response = await api.post<Product>('/products', data);
   return response.data;
@@ -61,6 +67,15 @@ async function updateProduct(id: string, data: Partial<Product>): Promise<Produc
 
 async function deleteProduct(id: string): Promise<void> {
   await api.delete(`/products/${id}`);
+}
+
+export function useProductByBarcode(barcode: string, enabled = true) {
+  return useQuery<Product>({
+    queryKey: ['products', 'barcode', barcode],
+    queryFn: () => fetchProductByBarcode(barcode),
+    enabled: enabled && !!barcode,
+    retry: false,
+  });
 }
 
 export function useProducts(params: ProductListParams = {}) {

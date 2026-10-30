@@ -1,6 +1,6 @@
 'use client';
 
-import axios, { AxiosError, AxiosInstance, InternalAxiosRequestConfig } from 'axios';
+import axios, { AxiosError, AxiosInstance, AxiosRequestConfig, InternalAxiosRequestConfig } from 'axios';
 import Cookies from 'js-cookie';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -94,7 +94,7 @@ class ApiClient {
     if (!refreshToken) throw new Error('No refresh token');
 
     const response = await axios.post(
-      `${API_URL}/api/v1/auth/refresh`,
+      `${API_URL}/api/v1/refresh`,
       { refresh_token: refreshToken },
       { withCredentials: true }
     );
@@ -113,8 +113,9 @@ class ApiClient {
   }
 
   // HTTP methods
-  get<T>(url: string, params?: object) {
-    return this.client.get<T>(url, { params });
+  // Mesmo formato do axios: api.get(url, { params })
+  get<T>(url: string, config?: AxiosRequestConfig) {
+    return this.client.get<T>(url, config);
   }
 
   post<T>(url: string, data?: object) {
@@ -136,75 +137,69 @@ class ApiClient {
 
 export const api = new ApiClient();
 
-// Type-safe API helpers
+// Autenticação (o restante das rotas é chamado pelos hooks em src/hooks)
 export const apiEndpoints = {
   auth: {
     login: (data: { email: string; password: string }) =>
-      api.post<{ access_token: string; refresh_token: string }>('/login', new URLSearchParams({
-        username: data.email,
-        password: data.password,
-      })),
-    refresh: (data: { refresh_token: string }) => api.post('/refresh', data),
+      axios.post<{ access_token: string; refresh_token: string }>(
+        `${API_URL}/api/v1/login`,
+        new URLSearchParams({
+          username: data.email,
+          password: data.password,
+        }),
+        {
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          withCredentials: true,
+        }
+      ),
     logout: () => api.post('/logout'),
     me: () => api.get<User>('/me'),
-    register: (data: object) => api.post('/register', data),
-    changePassword: (data: object) => api.patch('/me/password', data),
-    listUsers: (params?: object) => api.get('/users', params),
-    updateUser: (id: string, data: object) => api.patch(`/users/${id}`, data),
-  },
-  products: {
-    list: (params?: object) => api.get('/products', params),
-    create: (data: object) => api.post('/products', data),
-    get: (id: string) => api.get(`/products/${id}`),
-    update: (id: string, data: object) => api.patch(`/products/${id}`, data),
-    delete: (id: string) => api.delete(`/products/${id}`),
-  },
-  inventory: {
-    summary: (params?: object) => api.get('/inventory/summary', params),
-    batches: {
-      list: (params?: object) => api.get('/inventory/batches', params),
-      create: (data: object) => api.post('/inventory/batches', data),
-      get: (id: string) => api.get(`/inventory/batches/${id}`),
-      update: (id: string, data: object) => api.patch(`/inventory/batches/${id}`, data),
-    },
-    movements: {
-      list: (params?: object) => api.get('/inventory/movements', params),
-      create: (data: object) => api.post('/inventory/movements', data),
-    },
-  },
-  consumption: {
-    list: (params?: object) => api.get('/consumption', params),
-    create: (data: object) => api.post('/consumption', data),
-    import: (file: File) => {
-      const formData = new FormData();
-      formData.append('file', file);
-      return api.post('/consumption/import', formData);
-    },
-  },
-  predictions: {
-    list: (params?: object) => api.get('/predictions', params),
-    forecast: (data: object) => api.post('/predictions/forecast', data),
-    get: (id: string) => api.get(`/predictions/${id}`),
-    models: () => api.get('/predictions/models'),
-  },
-  dashboard: {
-    kpis: () => api.get('/dashboard/kpis'),
-    stockoutRisk: (params?: object) => api.get('/dashboard/stockout-risk', params),
-    expiryTimeline: (params?: object) => api.get('/dashboard/expiry-timeline', params),
-    consumptionTrends: (params?: object) => api.get('/dashboard/consumption-trends', params),
-  },
-  alerts: {
-    list: (params?: object) => api.get('/alerts', params),
-    acknowledge: (id: string) => api.post(`/alerts/${id}/acknowledge`),
-    bulkAcknowledge: (ids: string[]) => api.post('/alerts/bulk-acknowledge', { ids }),
-    rules: {
-      list: () => api.get('/alerts/rules'),
-      update: (data: object) => api.patch('/alerts/rules', data),
-    },
-  },
-  reports: {
-    list: (params?: object) => api.get('/reports', params),
-    generate: (data: object) => api.post('/reports/generate', data),
-    download: (id: string) => api.get(`/reports/${id}/download`, { responseType: 'blob' }),
+    changePassword: (data: { current_password: string; new_password: string }) =>
+      api.patch('/me/password', data),
   },
 };
+
+/** Busca todas as páginas de uma listagem paginada (para exportar). */
+export async function fetchAllPages<T>(
+  url: string,
+  params: object = {},
+  { pageSize = 100, maxRows = 10000 } = {}
+): Promise<T[]> {
+  const rows: T[] = [];
+  for (let page = 1; rows.length < maxRows; page++) {
+    const { data } = await api.get<{ items: T[]; pages: number }>(url, {
+      params: { ...params, page, size: pageSize },
+    });
+    rows.push(...data.items);
+    if (page >= data.pages) break;
+  }
+  return rows.slice(0, maxRows);
+}
+
+const ERROR_TRANSLATIONS: Record<string, string> = {
+  'Email already registered': 'Este e-mail já está cadastrado',
+  'Current password is incorrect': 'A senha atual está incorreta',
+  'Password must contain at least one uppercase letter': 'A senha precisa ter ao menos uma letra maiúscula',
+  'Password must contain at least one lowercase letter': 'A senha precisa ter ao menos uma letra minúscula',
+  'Password must contain at least one digit': 'A senha precisa ter ao menos um número',
+};
+
+/** Mensagem legível de um erro da API (FastAPI devolve `detail` como texto ou lista). */
+export function apiErrorMessage(error: unknown, fallback = 'Não foi possível concluir a operação'): string {
+  const detail = (error as AxiosError<{ detail?: unknown }>)?.response?.data?.detail;
+  const translate = (msg: string) => {
+    const clean = msg.replace(/^Value error, /, '');
+    return ERROR_TRANSLATIONS[clean] ?? clean;
+  };
+  if (typeof detail === 'string') return translate(detail);
+  if (Array.isArray(detail) && detail.length) {
+    const first = detail[0] as { msg?: string; loc?: unknown[] };
+    const field = String(first.loc?.[first.loc.length - 1] ?? '');
+    if (field.includes('password') && first.msg?.startsWith('String should have at least')) {
+      return 'A senha precisa ter ao menos 8 caracteres';
+    }
+    if (field === 'email') return 'E-mail inválido';
+    if (first.msg) return translate(first.msg);
+  }
+  return fallback;
+}

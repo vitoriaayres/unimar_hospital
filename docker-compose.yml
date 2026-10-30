@@ -1,3 +1,5 @@
+name: unimar_hospital
+
 services:
   postgres:
     image: postgres:15-alpine
@@ -15,40 +17,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-    networks:
-      - pharmapredict-network
-
-  redis:
-    image: redis:7-alpine
-    container_name: pharmapredict-redis
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-    networks:
-      - pharmapredict-network
-
-  mlflow:
-    image: ghcr.io/mlflow/mlflow:v2.12.1
-    container_name: pharmapredict-mlflow
-    command: >
-      mlflow server
-      --host 0.0.0.0
-      --port 5000
-      --backend-store-uri sqlite:///mlflow/mlflow.db
-      --default-artifact-root /mlflow/artifacts
-      --artifacts-destination /mlflow/artifacts
-    volumes:
-      - mlflow_data:/mlflow
-    ports:
-      - "5001:5000"
-    networks:
-      - pharmapredict-network
 
   backend:
     build:
@@ -63,23 +31,27 @@ services:
       POSTGRES_USER: pharmapredict
       POSTGRES_PASSWORD: pharmapredict_dev
       POSTGRES_DB: pharmapredict
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      REDIS_DB: 0
-      MLFLOW_TRACKING_URI: http://mlflow:5000
+    volumes:
+      # Modelo treinado e previsões geradas pelo pipeline em backend/ml
+      - ./backend/ml/models:/app/ml/models:ro
+      - ./backend/ml/data:/app/ml/data:ro
     depends_on:
       postgres:
         condition: service_healthy
-      redis:
-        condition: service_healthy
-    networks:
-      - pharmapredict-network
+    profiles: ["full"]
 
-networks:
-  pharmapredict-network:
-    driver: bridge
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8000
+    container_name: pharmapredict-frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    profiles: ["full"]
 
 volumes:
   postgres_data:
-  redis_data:
-  mlflow_data:

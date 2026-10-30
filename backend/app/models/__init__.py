@@ -17,6 +17,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -130,6 +131,7 @@ class Product(Base):
     __tablename__ = 'products'
     __table_args__ = (
         Index('ix_products_sku', 'sku', unique=True),
+        Index('ix_products_barcode', 'barcode', unique=True),
         Index('ix_products_category', 'category'),
         Index('ix_products_controlled', 'controlled_substance'),
         Index('ix_products_active', 'is_active'),
@@ -137,6 +139,8 @@ class Product(Base):
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
     sku: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
+    # Código de barras comercial do medicamento (ex.: EAN-13).
+    barcode: Mapped[str | None] = mapped_column(String(50), unique=True, nullable=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     generic_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     category: Mapped[ProductCategory] = enum_column(
@@ -171,10 +175,16 @@ class Product(Base):
         back_populates='product', cascade='all, delete-orphan'
     )
 
-
 class Warehouse(Base):
     __tablename__ = 'warehouses'
-    __table_args__ = (Index('ix_warehouses_primary', 'is_primary', unique=True),)
+    __table_args__ = (
+        Index(
+            'ix_warehouses_primary',
+            'is_primary',
+            unique=True,
+            postgresql_where=text('is_primary = true'),
+        ),
+    )
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
@@ -188,7 +198,6 @@ class Warehouse(Base):
     )
 
     batches: Mapped[list[InventoryBatch]] = relationship(back_populates='warehouse')
-
 
 class InventoryBatch(Base):
     __tablename__ = 'inventory_batches'

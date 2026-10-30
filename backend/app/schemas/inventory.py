@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class InventoryBatchBase(BaseModel):
@@ -28,6 +28,13 @@ class InventoryBatchUpdate(BaseModel):
     unit_cost: Decimal | None = Field(default=None, ge=0, decimal_places=2)
     status: Literal['available', 'reserved', 'expired', 'recalled', 'quarantine'] | None = None
 
+class InventoryProductRef(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    sku: str
+    name: str
+    generic_name: str | None = None
+    category: str
 
 class InventoryBatchResponse(InventoryBatchBase):
     model_config = ConfigDict(from_attributes=True)
@@ -42,7 +49,15 @@ class InventoryBatchResponse(InventoryBatchBase):
     days_until_expiry: int | None = None
     is_expired: bool = False
     is_expiring_soon: bool = False
+    product: InventoryProductRef | None = None
 
+    @model_validator(mode='after')
+    def _compute_expiry(self) -> InventoryBatchResponse:
+        days = (self.expiry_date - date.today()).days
+        self.days_until_expiry = days
+        self.is_expired = days < 0 or self.status == 'expired'
+        self.is_expiring_soon = 0 <= days <= 30
+        return self
 
 class StockMovementBase(BaseModel):
     quantity_change: int
@@ -82,3 +97,10 @@ class InventorySummary(BaseModel):
     days_of_supply: float | None
     is_low_stock: bool
     is_overstock: bool
+
+class InventoryBatchListResponse(BaseModel):
+    items: list[InventoryBatchResponse]
+    total: int
+    page: int
+    size: int
+    pages: int

@@ -1,575 +1,197 @@
 'use client';
 
-import React from 'react';
 import { useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
-import { usePredictions, useModels, useGenerateForecast, Prediction, PredictionListParams, ModelInfo, formatPredictionDate } from '@/hooks/usePredictions';
+import Link from 'next/link';
+import { usePredictions, useModels, Prediction, PredictionListParams, formatPredictionDate } from '@/hooks/usePredictions';
+import { useUrlParams } from '@/hooks/useUrlParams';
+import { fetchAllPages } from '@/lib/api';
 import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/Table';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
+import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs';
-import { ForecastChart } from '@/components/charts/ForecastChart';
-import { Package, Search, Filter, ChevronLeft, ChevronRight, Loader2, Download, Zap, Brain, TrendingUp, Settings } from 'lucide-react';
-import { cn, formatNumber, formatCurrency } from '@/lib/utils';
-import { debounce } from 'lodash-es';
+import { StatCard } from '@/components/ui/StatCard';
+import { SearchInput } from '@/components/ui/SearchInput';
+import { Pagination } from '@/components/ui/Pagination';
+import { Brain, Package, Target, CalendarDays, Loader2, Download, ChevronRight } from 'lucide-react';
+import { formatNumber, getCategoryLabel, downloadCsv } from '@/lib/utils';
+
+const SORTS = {
+  demand: { label: 'Maior demanda', sort_by: 'predicted_quantity', sort_order: 'desc' },
+  demand_asc: { label: 'Menor demanda', sort_by: 'predicted_quantity', sort_order: 'asc' },
+} as const;
+
+type SortKey = keyof typeof SORTS;
+
+function addDays(date: string, days: number) {
+  const d = new Date(date + 'T00:00:00');
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+}
 
 export default function PredictionsPage() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const [modelVersion, setModelVersion] = useState(searchParams.get('modelVersion') || '');
-  const [productId, setProductId] = useState(searchParams.get('productId') || '');
-  const [horizonDays, setHorizonDays] = useState(Number(searchParams.get('horizonDays')) || 30);
-  const [page, setPage] = useState(Number(searchParams.get('page')) || 1);
-  const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
-  const [showGenerateModal, setShowGenerateModal] = useState(false);
+  const url = useUrlParams();
+  const search = url.get('search');
+  const sort = (url.get('sort') in SORTS ? url.get('sort') : 'demand') as SortKey;
+  const [exporting, setExporting] = useState(false);
 
-  const params: PredictionListParams = {
-    page,
-    size: 20,
-    model_version: modelVersion || undefined,
-    product_id: productId || undefined,
-    horizon_days: horizonDays,
+  const filters: PredictionListParams = {
+    search: search || undefined,
+    sort_by: SORTS[sort].sort_by,
+    sort_order: SORTS[sort].sort_order,
   };
 
-  const { data: predictions, isLoading, error, refetch } = usePredictions(params);
-  const { data: models, isLoading: modelsLoading } = useModels();
-  const generateMutation = useGenerateForecast();
+  const { data: predictions, isLoading, isFetching } = usePredictions({ ...filters, page: url.page, size: 20 });
+  const { data: models } = useModels();
+  const model = models?.find((m) => m.is_production) ?? models?.[0];
+  const baseDate = predictions?.items[0]?.forecast_date;
 
-  const handleFilterChange = (key: string, value: string) => {
-    const params = new URLSearchParams(searchParams);
-    if (value) params.set(key, value);
-    else params.delete(key);
-    params.set('page', '1');
-    router.push(`/predictions?${params.toString()}`);
-  };
-
-  const handleHorizonChange = (value: string) => {
-    const numValue = Number(value) || 30;
-    setHorizonDays(numValue);
-    const params = new URLSearchParams(searchParams);
-    params.set('horizonDays', numValue.toString());
-    params.set('page', '1');
-    router.push(`/predictions?${params.toString()}`);
-  };
-
-  const handlePageChange = (newPage: number) => {
-    setPage(newPage);
-    const params = new URLSearchParams(searchParams);
-    params.set('page', newPage.toString());
-    router.push(`/predictions?${params.toString()}`);
-  };
-
-  const handleGenerateForecast = async () => {
-    if (!selectedProductId) return;
+  const handleExport = async () => {
+    setExporting(true);
     try {
-      await generateMutation.mutateAsync({
-        product_id: selectedProductId,
-        horizon_days: horizonDays,
-        model_version: modelVersion || undefined,
-      });
-      setShowGenerateModal(false);
-      refetch();
-    } catch (err) {
-      console.error('Erro ao gerar previsão:', err);
+      const rows = await fetchAllPages<Prediction>('/predictions', filters);
+      downloadCsv(
+        `previsoes-7dias-${new Date().toISOString().slice(0, 10)}.csv`,
+        [
+          { header: 'SKU', value: (p: Prediction) => p.product?.sku },
+          { header: 'Produto', value: (p: Prediction) => p.product?.name },
+          { header: 'Categoria', value: (p: Prediction) => (p.product ? getCategoryLabel(p.product.category) : '') },
+          { header: 'Data base', value: (p: Prediction) => formatPredictionDate(p.forecast_date) },
+          { header: 'Previsto 7 dias', value: (p: Prediction) => p.predicted_quantity },
+          { header: 'Mínimo esperado', value: (p: Prediction) => p.confidence_lower },
+          { header: 'Máximo esperado', value: (p: Prediction) => p.confidence_upper },
+        ],
+        rows
+      );
+    } finally {
+      setExporting(false);
     }
   };
 
-  const getProductPredictions = (productId: string) => {
-    return predictions?.items.filter(p => p.product_id === productId) || [];
-  };
-
-  const uniqueProducts = React.useMemo(() => {
-    const seen = new Set();
-    return predictions?.items.filter(p => {
-      if (p.product_id && !seen.has(p.product_id)) {
-        seen.add(p.product_id);
-        return true;
-      }
-      return false;
-    }) || [];
-  }, [predictions]);
-
-  if (isLoading && !predictions) {
-    return (
-      <div className="p-6">
-        <Card>
-          <CardContent className="py-12 text-center">
-            <Loader2 className="h-8 w-8 animate-spin mx-auto text-primary mb-2" />
-            <p className="text-muted-foreground">Carregando previsões...</p>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="space-y-6 p-4 lg:p-6">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Previsões de Demanda</h1>
-          <p className="text-muted-foreground">Visualização e comparação de modelos de previsão</p>
+          <h1 className="text-3xl font-bold tracking-tight">Previsões de demanda</h1>
+          <p className="text-muted-foreground">Consumo previsto pelo modelo para os próximos 7 dias de cada produto</p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm">
-            <Download className="mr-2 h-4 w-4" />
-            Exportar CSV
-          </Button>
-          <Button onClick={() => setShowGenerateModal(true)}>
-            <Zap className="mr-2 h-4 w-4" />
-            Gerar Previsão
-          </Button>
-        </div>
+        <Button variant="outline" size="sm" onClick={handleExport} disabled={exporting || !predictions?.total}>
+          {exporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+          Exportar CSV
+        </Button>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-4">
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Total de Previsões</p>
-                <p className="text-3xl font-bold">{formatNumber(predictions?.total || 0)}</p>
-              </div>
-              <div className="p-3 rounded-full bg-primary/10 text-primary">
-                <Brain className="h-6 w-6" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Produtos com Previsão</p>
-                <p className="text-3xl font-bold">{uniqueProducts.length}</p>
-              </div>
-              <div className="p-3 rounded-full bg-green-100 text-green-600">
-                <Package className="h-6 w-6" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Modelos Disponíveis</p>
-                <p className="text-3xl font-bold">{models?.length || 0}</p>
-              </div>
-              <div className="p-3 rounded-full bg-blue-100 text-blue-600">
-                <Settings className="h-6 w-6" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Horizonte Atual</p>
-                <p className="text-3xl font-bold">{horizonDays} dias</p>
-              </div>
-              <div className="p-3 rounded-full bg-amber-100 text-amber-600">
-                <TrendingUp className="h-6 w-6" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard name="Produtos com previsão" value={formatNumber(predictions?.total ?? 0)} icon={Package} color="text-green-600 bg-green-100" loading={isLoading} />
+        <StatCard
+          name="Janela prevista"
+          value={baseDate ? `${formatPredictionDate(addDays(baseDate, 1)).slice(0, 5)} a ${formatPredictionDate(addDays(baseDate, 7)).slice(0, 5)}` : '—'}
+          hint={baseDate ? `A partir do consumo até ${formatPredictionDate(baseDate)}` : undefined}
+          icon={CalendarDays}
+          color="text-amber-600 bg-amber-100"
+          loading={isLoading}
+        />
+        <StatCard name="Modelo" value={model?.model_type ?? '—'} hint={model ? `Treinado em ${formatPredictionDate(model.training_date)}` : undefined} icon={Brain} />
+        <StatCard
+          name="Acurácia do modelo"
+          value={model ? `${((1 - model.wape) * 100).toFixed(1)}%` : '—'}
+          hint={model ? `WAPE ${(model.wape * 100).toFixed(1)}% no teste` : undefined}
+          icon={Target}
+          color="text-indigo-600 bg-indigo-100"
+        />
       </div>
 
-      <Tabs defaultValue="table" className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="table">Tabela Comparativa</TabsTrigger>
-          <TabsTrigger value="chart">Gráficos</TabsTrigger>
-          <TabsTrigger value="models">Modelos</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="table">
-          <Card>
-            <CardHeader className="pb-2">
-              <div className="flex flex-col sm:flex-row gap-4">
-                <Select value={modelVersion} onValueChange={(v) => handleFilterChange('modelVersion', v)}>
-                  <SelectTrigger className="w-full sm:w-[200px]">
-                    <SelectValue placeholder="Todos os modelos" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="">Todos os modelos</SelectItem>
-                    {models?.map((m) => (
-                      <SelectItem key={m.model_version} value={m.model_version}>
-                        {m.model_type} (v{m.model_version}) - WAPE: {(m.wape * 100).toFixed(1)}%
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Select value={productId} onValueChange={(v) => handleFilterChange('productId', v)}>
-                  <SelectTrigger className="w-full sm:w-[250px]">
-                    <SelectValue placeholder="Todos os produtos" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="">Todos os produtos</SelectItem>
-                    {uniqueProducts.map((p) => (
-                      <SelectItem key={p.product_id} value={p.product_id}>
-                        {p.product?.name} ({p.product?.sku})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Select value={horizonDays.toString()} onValueChange={handleHorizonChange}>
-                  <SelectTrigger className="w-full sm:w-[150px]">
-                    <SelectValue placeholder="Horizonte" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="7">7 dias</SelectItem>
-                    <SelectItem value="15">15 dias</SelectItem>
-                    <SelectItem value="30">30 dias</SelectItem>
-                    <SelectItem value="60">60 dias</SelectItem>
-                    <SelectItem value="90">90 dias</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {predictions?.items.length === 0 ? (
-                <div className="text-center py-12">
-                  <Brain className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                  <h3 className="text-lg font-medium mb-1">Nenhuma previsão encontrada</h3>
-                  <p className="text-muted-foreground mb-4">
-                    {modelVersion || productId ? 'Tente ajustar os filtros' : 'Gere a primeira previsão'}
-                  </p>
-                  <Button onClick={() => setShowGenerateModal(true)}>
-                    <Zap className="mr-2 h-4 w-4" />
-                    Gerar Previsão
-                  </Button>
-                </div>
-              ) : (
-                <>
-                  <div className="overflow-x-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Produto</TableHead>
-                          <TableHead>Data Prevista</TableHead>
-                          <TableHead className="text-right">Previsto</TableHead>
-                          <TableHead className="text-right">IC Inferior</TableHead>
-                          <TableHead className="text-right">IC Superior</TableHead>
-                          <TableHead>Modelo</TableHead>
-                          <TableHead className="text-right">WAPE</TableHead>
-                          <TableHead>Criado em</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {predictions?.items.map((pred) => (
-                          <TableRow key={pred.id} className="hover:bg-muted/50">
-                            <TableCell>
-                              <div>
-                                <p className="font-medium">{pred.product?.name || 'Produto não encontrado'}</p>
-                                <p className="text-xs text-muted-foreground font-mono">{pred.product?.sku}</p>
-                              </div>
-                            </TableCell>
-                            <TableCell>{formatPredictionDate(pred.forecast_date)}</TableCell>
-                            <TableCell className="text-right font-medium">{formatNumber(pred.predicted_quantity)}</TableCell>
-                            <TableCell className="text-right text-muted-foreground">{formatNumber(pred.confidence_lower)}</TableCell>
-                            <TableCell className="text-right text-muted-foreground">{formatNumber(pred.confidence_upper)}</TableCell>
-                            <TableCell>
-                              <Badge variant="secondary" className="text-xs">
-                                v{pred.model_version}
-                              </Badge>
-                            </TableCell>
-                            <TableCell className="text-right">
-                              {pred.wape_score !== null ? (
-                                <span className={cn(
-                                  'font-medium',
-                                  pred.wape_score < 0.1 ? 'text-green-600' : pred.wape_score < 0.15 ? 'text-amber-600' : 'text-destructive'
-                                )}>
-                                  {(pred.wape_score * 100).toFixed(1)}%
-                                </span>
-                              ) : (
-                                <span className="text-muted-foreground">—</span>
-                              )}
-                            </TableCell>
-                            <TableCell className="text-sm text-muted-foreground">
-                              {new Date(pred.created_at).toLocaleString('pt-BR')}
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-
-                  {predictions && predictions.pages > 1 && (
-                    <div className="flex items-center justify-between mt-4">
-                      <p className="text-sm text-muted-foreground">
-                        Página {predictions.page} de {predictions.pages} — {predictions.total} previsões
-                      </p>
-                      <div className="flex items-center gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handlePageChange(page - 1)}
-                          disabled={page <= 1}
-                        >
-                          <ChevronLeft className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handlePageChange(page + 1)}
-                          disabled={page >= predictions.pages}
-                        >
-                          <ChevronRight className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                </>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="chart">
-          {uniqueProducts.length === 0 ? (
-            <Card>
-              <CardContent className="py-12 text-center">
-                <Brain className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                <p className="text-muted-foreground">Selecione um produto para ver o gráfico</p>
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="space-y-6">
-              <div className="flex items-center gap-4">
-                <label className="text-sm font-medium">Produto:</label>
-                <Select value={selectedProductId || ''} onValueChange={setSelectedProductId}>
-                  <SelectTrigger className="w-[300px]">
-                    <SelectValue placeholder="Selecione um produto" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {uniqueProducts.map((p) => (
-                      <SelectItem key={p.product_id} value={p.product_id}>
-                        {p.product?.name} ({p.product?.sku})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {selectedProductId && (
-                <>
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>
-                        {uniqueProducts.find(p => p.product_id === selectedProductId)?.product?.name}
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <ForecastChart
-                        data={getProductPredictions(selectedProductId).map(p => ({
-                          date: p.forecast_date,
-                          actual: null,
-                          predicted: p.predicted_quantity,
-                          lower: p.confidence_lower,
-                          upper: p.confidence_upper,
-                        }))}
-                        height={400}
-                      />
-                    </CardContent>
-                  </Card>
-
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>Detalhamento por Modelo</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="overflow-x-auto">
-                        <Table>
-                          <TableHeader>
-                            <TableRow>
-                              <TableHead>Modelo</TableHead>
-                              <TableHead className="text-right">Média Prevista (30d)</TableHead>
-                              <TableHead className="text-right">Total Previsto (30d)</TableHead>
-                              <TableHead className="text-right">WAPE Médio</TableHead>
-                              <TableHead>Última Atualização</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {React.useMemo(() => {
-                              const byModel = new Map<string, Prediction[]>();
-                              getProductPredictions(selectedProductId).forEach(p => {
-                                if (!byModel.has(p.model_version)) byModel.set(p.model_version, []);
-                                byModel.get(p.model_version)!.push(p);
-                              });
-                              return Array.from(byModel.entries()).map(([model, preds]) => ({
-                                model,
-                                avgPredicted: preds.reduce((s, p) => s + p.predicted_quantity, 0) / preds.length,
-                                totalPredicted: preds.reduce((s, p) => s + p.predicted_quantity, 0),
-                                avgWape: (preds.filter(p => p.wape_score !== null).reduce((s, p) => s + (p.wape_score || 0), 0) / Math.max(1, preds.filter(p => p.wape_score !== null).length)) * 100,
-                                lastUpdate: Math.max(...preds.map(p => new Date(p.created_at).getTime())),
-                              }));
-                            }, [selectedProductId]).map((row) => (
-                              <TableRow key={row.model} className="hover:bg-muted/50">
-                                <TableCell>
-                                  <Badge variant="secondary">v{row.model}</Badge>
-                                </TableCell>
-                                <TableCell className="text-right">{row.avgPredicted.toFixed(1)}</TableCell>
-                                <TableCell className="text-right">{formatNumber(row.totalPredicted)}</TableCell>
-                                <TableCell className="text-right">
-                                  {row.avgWape > 0 ? (
-                                    <span className={cn(
-                                      'font-medium',
-                                      row.avgWape < 10 ? 'text-green-600' : row.avgWape < 15 ? 'text-amber-600' : 'text-destructive'
-                                    )}>
-                                      {row.avgWape.toFixed(1)}%
-                                    </span>
-                                  ) : (
-                                    <span className="text-muted-foreground">—</span>
-                                  )}
-                                </TableCell>
-                                <TableCell className="text-sm text-muted-foreground">
-                                  {new Date(row.lastUpdate).toLocaleString('pt-BR')}
-                                </TableCell>
-                              </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </>
-              )}
-            </div>
-          )}
-        </TabsContent>
-
-        <TabsContent value="models">
-          <Card>
-            <CardHeader>
-              <CardTitle>Modelos Disponíveis</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {modelsLoading ? (
-                <div className="py-12 text-center">
-                  <Loader2 className="h-8 w-8 animate-spin mx-auto text-primary mb-2" />
-                  <p className="text-muted-foreground">Carregando modelos...</p>
-                </div>
-              ) : models?.length === 0 ? (
-                <div className="text-center py-12">
-                  <Brain className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                  <h3 className="text-lg font-medium mb-1">Nenhum modelo cadastrado</h3>
-                  <p className="text-muted-foreground">Treine modelos no pipeline de ML</p>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {models?.map((model) => (
-                    <div key={model.model_version} className="flex items-center justify-between p-4 rounded-lg border">
-                      <div className="flex items-center gap-4">
-                        <div className="p-3 rounded-lg bg-primary/10">
-                          <Brain className="h-6 w-6 text-primary" />
-                        </div>
-                        <div>
-                          <p className="font-medium">{model.model_type}</p>
-                          <p className="text-sm text-muted-foreground">
-                            v{model.model_version} • {model.is_production ? 'Ativo' : 'Inativo'}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-4">
-                        <div className="text-right">
-                          <p className="text-sm text-muted-foreground">WAPE</p>
-                          <p className={cn(
-                            'font-bold',
-                            model.wape * 100 < 10 ? 'text-green-600' : model.wape * 100 < 15 ? 'text-amber-600' : 'text-destructive'
-                          )}>
-                            {(model.wape * 100).toFixed(1)}%
-                          </p>
-                        </div>
-                        <Badge variant={model.is_production ? 'success' : 'secondary'} className="text-xs">
-                          {model.is_production ? 'Produção' : 'Homologação'}
-                        </Badge>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
-
-      {showGenerateModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="bg-background w-full max-w-md rounded-lg border p-6 shadow-lg">
-            <h2 className="text-xl font-bold mb-4">Gerar Nova Previsão</h2>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium mb-1">Produto</label>
-                <Select value={selectedProductId || ''} onValueChange={setSelectedProductId}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Selecione um produto" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {uniqueProducts.map((p) => (
-                      <SelectItem key={p.product_id} value={p.product_id}>
-                        {p.product?.name} ({p.product?.sku})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">Horizonte (dias)</label>
-                <Select value={horizonDays.toString()} onValueChange={handleHorizonChange}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="7">7 dias</SelectItem>
-                    <SelectItem value="15">15 dias</SelectItem>
-                    <SelectItem value="30">30 dias</SelectItem>
-                    <SelectItem value="60">60 dias</SelectItem>
-                    <SelectItem value="90">90 dias</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">Modelo</label>
-                <Select value={modelVersion} onValueChange={(v) => handleFilterChange('modelVersion', v)}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Auto (melhor modelo)" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="">Auto (melhor modelo)</SelectItem>
-                    {models?.map((m) => (
-                      <SelectItem key={m.model_version} value={m.model_version}>
-                        {m.model_type} (v{m.model_version})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="flex justify-end gap-2 mt-6">
-              <Button variant="outline" onClick={() => setShowGenerateModal(false)}>
-                Cancelar
-              </Button>
-              <Button
-                onClick={handleGenerateForecast}
-                disabled={generateMutation.isPending || !selectedProductId}
-              >
-                {generateMutation.isPending ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Gerando...
-                  </>
-                ) : (
-                  'Gerar Previsão'
-                )}
-              </Button>
-            </div>
+      <Card>
+        <CardHeader className="pb-2">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <SearchInput
+              value={search}
+              onChange={(v) => url.set({ search: v })}
+              placeholder="Buscar produto por nome ou SKU..."
+              className="flex-1 sm:max-w-md"
+            />
+            <Select value={sort} onValueChange={(v) => url.set({ sort: v === 'demand' ? null : v })}>
+              <SelectTrigger className="w-full sm:w-[180px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {Object.entries(SORTS).map(([key, s]) => (
+                  <SelectItem key={key} value={key}>{s.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {isFetching && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+            <Link href="/model" className="text-sm text-primary hover:underline sm:ml-auto">
+              Ver desempenho do modelo
+            </Link>
           </div>
-        </div>
-      )}
+        </CardHeader>
+        <CardContent>
+          {isLoading ? (
+            <div className="py-12 text-center">
+              <Loader2 className="mx-auto mb-2 h-8 w-8 animate-spin text-primary" />
+              <p className="text-muted-foreground">Carregando previsões...</p>
+            </div>
+          ) : !predictions?.items.length ? (
+            <div className="py-12 text-center">
+              <Brain className="mx-auto mb-4 h-12 w-12 text-muted-foreground" />
+              <h3 className="mb-1 text-lg font-medium">Nenhuma previsão encontrada</h3>
+              <p className="text-muted-foreground">
+                {search ? 'Tente outra busca' : <>Gere as previsões com <code>uv run python ml/predict.py</code> no backend</>}
+              </p>
+            </div>
+          ) : (
+            <>
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Produto</TableHead>
+                      <TableHead className="hidden md:table-cell">Categoria</TableHead>
+                      <TableHead className="text-right">Previsto (7 dias)</TableHead>
+                      <TableHead className="hidden text-right sm:table-cell">Por dia</TableHead>
+                      <TableHead className="hidden text-right lg:table-cell">Faixa esperada</TableHead>
+                      <TableHead className="w-24" />
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {predictions.items.map((pred) => (
+                      <TableRow key={pred.id} className="hover:bg-muted/50">
+                        <TableCell>
+                          <p className="font-medium">{pred.product?.name ?? 'Produto não encontrado'}</p>
+                          <p className="font-mono text-xs text-muted-foreground">{pred.product?.sku}</p>
+                        </TableCell>
+                        <TableCell className="hidden md:table-cell">
+                          {pred.product && <Badge variant="secondary" className="text-xs">{getCategoryLabel(pred.product.category)}</Badge>}
+                        </TableCell>
+                        <TableCell className="text-right font-semibold tabular-nums">{formatNumber(pred.predicted_quantity)}</TableCell>
+                        <TableCell className="hidden text-right tabular-nums text-muted-foreground sm:table-cell">
+                          {formatNumber(Math.round(pred.predicted_quantity / 7))}
+                        </TableCell>
+                        <TableCell className="hidden text-right tabular-nums text-muted-foreground lg:table-cell">
+                          {formatNumber(pred.confidence_lower)} – {formatNumber(pred.confidence_upper)}
+                        </TableCell>
+                        <TableCell>
+                          <Link href={`/products/${pred.product_id}`} className="inline-flex items-center text-sm text-primary hover:underline">
+                            Gráfico <ChevronRight className="h-4 w-4" />
+                          </Link>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+              <Pagination
+                page={predictions.page}
+                pages={predictions.pages}
+                total={predictions.total}
+                label="produtos"
+                onPageChange={(p) => url.set({ page: p }, { resetPage: false })}
+              />
+            </>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }
