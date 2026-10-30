@@ -12,10 +12,13 @@ Falta de medicamento × perda por vencimento. Hoje a compra é guiada pela médi
 Login `admin@hospital.gov.br` / `admin123`, depois:
 
 1. **Dashboard:** indicadores, produtos com risco de falta, vencimentos próximos.
-2. **Produtos → Ler código:** apontar a câmera para uma caixa de remédio (ou digitar o código).
+2. **Produtos → Ler código:** apontar a câmera para uma caixa de remédio ou digitar `7890000000017`
+   (Omeprazol 10mg).
 3. **Estoque:** lotes por validade (FEFO).
-4. **Previsões:** escolher um produto e mostrar a previsão dos próximos dias.
-5. **Alertas:** reconhecer um alerta.
+4. **Previsões:** buscar um produto e clicar em **Gráfico**: consumo real dos últimos 30 dias
+   seguido da previsão, e por quantos dias o estoque cobre.
+5. **Alertas:** reconhecer um alerta (o sino no topo diminui).
+6. **Relatórios:** baixar a planilha de risco de falta e abrir no Excel.
 
 ## 3. Resultado do modelo (5 min)
 

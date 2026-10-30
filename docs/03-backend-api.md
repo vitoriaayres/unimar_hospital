@@ -48,12 +48,12 @@ Cada arquivo em `api/v1/` segue o mesmo padrão: `router = APIRouter(prefix=...)
 | Método | Rota | Descrição |
 |---|---|---|
 | GET | `/inventory/summary` | Resumo de estoque por produto |
-| GET | `/inventory/batches` | Lotes (paginado) |
+| GET | `/inventory/batches` | Lotes por validade (paginado); filtros `search`, `product_id`, `status`, `expiring_within_days`, `in_stock` |
 | POST | `/inventory/batches` | Novo lote (manager/admin) |
 | GET | `/inventory/batches/{id}` | Detalhe do lote |
 | PATCH | `/inventory/batches/{id}` | Edita lote (manager/admin) |
 | POST | `/inventory/movements` | Registra movimentação |
-| GET | `/inventory/movements` | Lista movimentações |
+| GET | `/inventory/movements` | Lista movimentações; filtros `product_id`, `batch_id`, `movement_type` |
 
 ### Consumo (`consumption.py`)
 | Método | Rota | Descrição |
@@ -66,8 +66,8 @@ Cada arquivo em `api/v1/` segue o mesmo padrão: `router = APIRouter(prefix=...)
 ### Previsões e modelo (`predictions.py`)
 | Método | Rota | Descrição |
 |---|---|---|
-| GET | `/predictions` | Previsões gravadas pelo pipeline |
-| POST | `/predictions/forecast` | Gera previsão para um produto |
+| GET | `/predictions` | Previsões de 7 dias gravadas pelo pipeline; busca `search` e ordenação `sort_by` |
+| POST | `/predictions/forecast` | Previsão diária de um produto (até 90 dias) a partir da previsão de 7 dias |
 | GET | `/predictions/model-report` | Avaliação do modelo (tela **Modelo**) |
 | GET | `/predictions/models` | Modelo em produção e métricas |
 
@@ -76,13 +76,14 @@ Cada arquivo em `api/v1/` segue o mesmo padrão: `router = APIRouter(prefix=...)
 |---|---|---|
 | GET | `/dashboard` | Tudo do dashboard em uma chamada |
 | GET | `/dashboard/kpis` | Indicadores |
-| GET | `/dashboard/stockout-risk` | Produtos com risco de falta |
-| GET | `/dashboard/expiry-timeline` | Vencimentos próximos |
-| GET | `/dashboard/consumption-trends` | Tendência de consumo |
+| GET | `/dashboard/stockout-risk` | Produtos com menor cobertura (estoque ÷ previsão) |
+| GET | `/dashboard/expiry-timeline` | Lotes com saldo que vencem em breve |
+| GET | `/dashboard/consumption-trends` | Consumo diário por setor e categoria; filtro `product_id` |
 | GET | `/alerts` | Alertas (paginado) |
 | POST | `/alerts/{id}/acknowledge` | Reconhece alerta |
 | POST | `/alerts/bulk-acknowledge` | Reconhece vários |
-| GET/PATCH | `/alerts/rules` | Regras de alerta |
+| GET | `/alerts/rules` | Regras de alerta |
+| PATCH | `/alerts/rules/{id}` | Liga/desliga uma regra (manager/admin; fica em memória até reiniciar) |
 
 ## Segurança
 
