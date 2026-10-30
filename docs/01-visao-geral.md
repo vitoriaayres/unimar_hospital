@@ -26,12 +26,13 @@ aprendizado de máquina**:
 | Dashboard | `/` | KPIs, risco de falta, vencimentos, tendência de consumo |
 | Produtos | `/products` | Catálogo, cadastro, edição, detalhes |
 | Ler código | `/products/scan` | Leitura por câmera ou digitação |
-| Estoque | `/inventory` | Lotes, validade, movimentações |
-| Previsões | `/predictions` | Previsão por produto e geração sob demanda |
+| Estoque | `/inventory` | Lotes por validade (FEFO), linha do tempo, exportação |
+| Previsões | `/predictions` | Previsão dos próximos 7 dias por produto |
 | Modelo | `/model` | Acurácia, real × previsto, erro por categoria, variáveis mais importantes |
 | Alertas | `/alerts` | Alertas e regras |
-| Relatórios | `/reports` | Relatórios gerenciais |
+| Relatórios | `/reports` | Planilhas CSV (estoque, risco de falta, vencimentos, previsões, alertas) |
 | Usuários | `/users` | Gestão de usuários (somente admin) |
+| Configurações | `/settings` | Perfil, troca de senha, dados do modelo |
 
 ## Dados
 

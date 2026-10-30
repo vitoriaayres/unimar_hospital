@@ -87,7 +87,7 @@ def plot_weekly(report: dict) -> Path:
         ls='--',
         label='Método atual (média 7 dias)',
     )
-    ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f'{v / 1000:.0f}k'))
+    ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f'{v / 1e6:.0f} mi'.replace('.', ',')))
     ax.set_title('Consumo real × previsto no período de teste (soma semanal)')
     ax.grid(alpha=0.3)
     ax.legend(frameon=False)
@@ -115,7 +115,7 @@ def plot_categories(report: dict) -> Path:
     ax.set_yticks(list(y), labels)
     ax.set_xlabel('Erro (WAPE, %)')
     ax.set_title('Erro por categoria de medicamento')
-    ax.legend(frameon=False, loc='lower right')
+    ax.legend(frameon=False, loc='upper center', bbox_to_anchor=(0.5, -0.1), ncol=2)
     return save(fig, 'modelo-erro-por-categoria.png')
 
 
