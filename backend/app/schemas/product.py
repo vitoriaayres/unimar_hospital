@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 class ProductBase(BaseModel):
     sku: str = Field(min_length=1, max_length=50)
+    barcode: str | None = Field(default=None, min_length=8, max_length=50)
     name: str = Field(min_length=1, max_length=255)
     generic_name: str | None = Field(default=None, max_length=255)
     category: Literal[
@@ -45,6 +46,7 @@ class ProductCreate(ProductBase):
 
 
 class ProductUpdate(BaseModel):
+    barcode: str | None = Field(default=None, min_length=8, max_length=50)
     name: str | None = Field(default=None, min_length=1, max_length=255)
     generic_name: str | None = Field(default=None, max_length=255)
     category: (

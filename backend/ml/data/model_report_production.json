@@ -1,0 +1,517 @@
+{
+  "metrics": {
+    "mape": 0.139544,
+    "smape": 0.136037,
+    "wape": 0.143242,
+    "rmse": 764.7177,
+    "mae": 234.8627,
+    "baseline_wape": 0.19056,
+    "baseline_mape": 0.191766,
+    "mape_low": 0.142956,
+    "wape_low": 0.138656,
+    "mape_mid": 0.13513,
+    "wape_mid": 0.135242,
+    "mape_high": 0.140549,
+    "wape_high": 0.146447,
+    "model_type": "lightgbm",
+    "objective": "regression_log1p",
+    "blend_weight": 0.75,
+    "target": "consumption_next_7d_sum",
+    "n_features": 102,
+    "n_train": 731999,
+    "n_valid": 90500,
+    "n_test": 205998,
+    "best_iteration": 108,
+    "trained_at": "2026-10-22T23:07:48.094258Z"
+  },
+  "test_period": {
+    "start": "2025-08-03",
+    "end": "2026-09-18"
+  },
+  "weekly": [
+    {
+      "week": "2025-07-28",
+      "actual": 919533.0,
+      "predicted": 880242.3,
+      "baseline": 974370.0
+    },
+    {
+      "week": "2025-08-04",
+      "actual": 6540396.0,
+      "predicted": 6088495.2,
+      "baseline": 6513371.0
+    },
+    {
+      "week": "2025-08-11",
+      "actual": 6703305.0,
+      "predicted": 6328223.0,
+      "baseline": 6540396.0
+    },
+    {
+      "week": "2025-08-18",
+      "actual": 6839615.0,
+      "predicted": 6460293.6,
+      "baseline": 6703305.0
+    },
+    {
+      "week": "2025-08-25",
+      "actual": 5567735.0,
+      "predicted": 5901961.1,
+      "baseline": 6839615.0
+    },
+    {
+      "week": "2025-09-01",
+      "actual": 4838551.0,
+      "predicted": 4838913.1,
+      "baseline": 5567735.0
+    },
+    {
+      "week": "2025-09-08",
+      "actual": 4426402.0,
+      "predicted": 4516050.1,
+      "baseline": 4838551.0
+    },
+    {
+      "week": "2025-09-15",
+      "actual": 4376229.0,
+      "predicted": 4311329.1,
+      "baseline": 4426402.0
+    },
+    {
+      "week": "2025-09-22",
+      "actual": 4205104.0,
+      "predicted": 4274572.0,
+      "baseline": 4376229.0
+    },
+    {
+      "week": "2025-09-29",
+      "actual": 4174675.0,
+      "predicted": 4156157.5,
+      "baseline": 4205104.0
+    },
+    {
+      "week": "2025-10-06",
+      "actual": 4314617.0,
+      "predicted": 4122081.0,
+      "baseline": 4174675.0
+    },
+    {
+      "week": "2025-10-13",
+      "actual": 3854870.0,
+      "predicted": 4011525.7,
+      "baseline": 4314617.0
+    },
+    {
+      "week": "2025-10-20",
+      "actual": 3690344.0,
+      "predicted": 3831083.7,
+      "baseline": 3854870.0
+    },
+    {
+      "week": "2025-10-27",
+      "actual": 4060751.0,
+      "predicted": 3751588.0,
+      "baseline": 3690344.0
+    },
+    {
+      "week": "2025-11-03",
+      "actual": 3913379.0,
+      "predicted": 3884302.9,
+      "baseline": 4060751.0
+    },
+    {
+      "week": "2025-11-10",
+      "actual": 3956016.0,
+      "predicted": 3925523.3,
+      "baseline": 3913189.0
+    },
+    {
+      "week": "2025-11-17",
+      "actual": 3841592.0,
+      "predicted": 3909841.0,
+      "baseline": 3956206.0
+    },
+    {
+      "week": "2025-11-24",
+      "actual": 3849030.0,
+      "predicted": 3847639.9,
+      "baseline": 3841592.0
+    },
+    {
+      "week": "2025-12-01",
+      "actual": 3961431.0,
+      "predicted": 3985213.7,
+      "baseline": 3849030.0
+    },
+    {
+      "week": "2025-12-08",
+      "actual": 4334363.0,
+      "predicted": 4296458.5,
+      "baseline": 3961431.0
+    },
+    {
+      "week": "2025-12-15",
+      "actual": 5506682.0,
+      "predicted": 5333717.3,
+      "baseline": 4334363.0
+    },
+    {
+      "week": "2025-12-22",
+      "actual": 6284558.0,
+      "predicted": 5874449.8,
+      "baseline": 5506682.0
+    },
+    {
+      "week": "2025-12-29",
+      "actual": 5530837.0,
+      "predicted": 5598517.9,
+      "baseline": 6284558.0
+    },
+    {
+      "week": "2026-01-05",
+      "actual": 5246491.0,
+      "predicted": 5257782.8,
+      "baseline": 5530837.0
+    },
+    {
+      "week": "2026-01-12",
+      "actual": 5418144.0,
+      "predicted": 5285057.6,
+      "baseline": 5246491.0
+    },
+    {
+      "week": "2026-01-19",
+      "actual": 5474177.0,
+      "predicted": 5369040.3,
+      "baseline": 5418144.0
+    },
+    {
+      "week": "2026-01-26",
+      "actual": 5210386.0,
+      "predicted": 5276085.4,
+      "baseline": 5474177.0
+    },
+    {
+      "week": "2026-02-02",
+      "actual": 5410636.0,
+      "predicted": 5176970.3,
+      "baseline": 5210386.0
+    },
+    {
+      "week": "2026-02-09",
+      "actual": 7251113.0,
+      "predicted": 5849900.2,
+      "baseline": 5410636.0
+    },
+    {
+      "week": "2026-02-16",
+      "actual": 5821474.0,
+      "predicted": 6063048.1,
+      "baseline": 7251113.0
+    },
+    {
+      "week": "2026-02-23",
+      "actual": 4844285.0,
+      "predicted": 5271872.3,
+      "baseline": 5821474.0
+    },
+    {
+      "week": "2026-03-02",
+      "actual": 4765619.0,
+      "predicted": 4681347.6,
+      "baseline": 4844285.0
+    },
+    {
+      "week": "2026-03-09",
+      "actual": 4522732.0,
+      "predicted": 4618502.0,
+      "baseline": 4765619.0
+    },
+    {
+      "week": "2026-03-16",
+      "actual": 4375920.0,
+      "predicted": 4475103.4,
+      "baseline": 4522732.0
+    },
+    {
+      "week": "2026-03-23",
+      "actual": 4580312.0,
+      "predicted": 4371426.0,
+      "baseline": 4375920.0
+    },
+    {
+      "week": "2026-03-30",
+      "actual": 4661303.0,
+      "predicted": 4623734.8,
+      "baseline": 4580312.0
+    },
+    {
+      "week": "2026-04-06",
+      "actual": 4319286.0,
+      "predicted": 4702646.2,
+      "baseline": 4661303.0
+    },
+    {
+      "week": "2026-04-13",
+      "actual": 4602289.0,
+      "predicted": 4741395.5,
+      "baseline": 4318841.0
+    },
+    {
+      "week": "2026-04-20",
+      "actual": 4688062.0,
+      "predicted": 4848735.0,
+      "baseline": 4602734.0
+    },
+    {
+      "week": "2026-04-27",
+      "actual": 5578991.0,
+      "predicted": 5195415.6,
+      "baseline": 4688062.0
+    },
+    {
+      "week": "2026-05-04",
+      "actual": 7717913.0,
+      "predicted": 6601573.7,
+      "baseline": 5578991.0
+    },
+    {
+      "week": "2026-05-11",
+      "actual": 11153679.0,
+      "predicted": 9695437.0,
+      "baseline": 7717913.0
+    },
+    {
+      "week": "2026-05-18",
+      "actual": 10523926.0,
+      "predicted": 11092720.9,
+      "baseline": 11153679.0
+    },
+    {
+      "week": "2026-05-25",
+      "actual": 9067096.0,
+      "predicted": 9764902.3,
+      "baseline": 10523926.0
+    },
+    {
+      "week": "2026-06-01",
+      "actual": 8729376.0,
+      "predicted": 8171686.7,
+      "baseline": 9067096.0
+    },
+    {
+      "week": "2026-06-08",
+      "actual": 9779565.0,
+      "predicted": 7909660.8,
+      "baseline": 8729376.0
+    },
+    {
+      "week": "2026-06-15",
+      "actual": 8639663.0,
+      "predicted": 8564847.1,
+      "baseline": 9779565.0
+    },
+    {
+      "week": "2026-06-22",
+      "actual": 7231250.0,
+      "predicted": 7944912.2,
+      "baseline": 8639663.0
+    },
+    {
+      "week": "2026-06-29",
+      "actual": 7215874.0,
+      "predicted": 7166942.1,
+      "baseline": 7231250.0
+    },
+    {
+      "week": "2026-07-06",
+      "actual": 7156407.0,
+      "predicted": 7199373.5,
+      "baseline": 7215874.0
+    },
+    {
+      "week": "2026-07-13",
+      "actual": 6883681.0,
+      "predicted": 7962952.4,
+      "baseline": 7156407.0
+    },
+    {
+      "week": "2026-07-20",
+      "actual": 6630114.0,
+      "predicted": 8083574.5,
+      "baseline": 6883681.0
+    },
+    {
+      "week": "2026-07-27",
+      "actual": 6409070.0,
+      "predicted": 6644251.0,
+      "baseline": 6630114.0
+    },
+    {
+      "week": "2026-08-03",
+      "actual": 6511809.0,
+      "predicted": 6042622.4,
+      "baseline": 6409070.0
+    },
+    {
+      "week": "2026-08-10",
+      "actual": 6645572.0,
+      "predicted": 6292721.0,
+      "baseline": 6511809.0
+    },
+    {
+      "week": "2026-08-17",
+      "actual": 6709383.0,
+      "predicted": 6447149.3,
+      "baseline": 6645572.0
+    },
+    {
+      "week": "2026-08-24",
+      "actual": 5806329.0,
+      "predicted": 5997708.2,
+      "baseline": 6709383.0
+    },
+    {
+      "week": "2026-08-31",
+      "actual": 4818065.0,
+      "predicted": 4946421.0,
+      "baseline": 5806329.0
+    },
+    {
+      "week": "2026-09-07",
+      "actual": 4549786.0,
+      "predicted": 4537657.5,
+      "baseline": 4818065.0
+    },
+    {
+      "week": "2026-09-14",
+      "actual": 3119180.0,
+      "predicted": 3129689.8,
+      "baseline": 3271873.0
+    }
+  ],
+  "by_category": [
+    {
+      "category": "analgesic",
+      "wape": 0.1346,
+      "baseline_wape": 0.181928,
+      "n": 29252
+    },
+    {
+      "category": "antithrombotic",
+      "wape": 0.13775,
+      "baseline_wape": 0.179475,
+      "n": 19364
+    },
+    {
+      "category": "ace_inhibitor",
+      "wape": 0.138008,
+      "baseline_wape": 0.181883,
+      "n": 14008
+    },
+    {
+      "category": "other",
+      "wape": 0.138724,
+      "baseline_wape": 0.18993,
+      "n": 39552
+    },
+    {
+      "category": "psycholeptic",
+      "wape": 0.139553,
+      "baseline_wape": 0.187959,
+      "n": 8239
+    },
+    {
+      "category": "ppi",
+      "wape": 0.140191,
+      "baseline_wape": 0.192413,
+      "n": 16068
+    },
+    {
+      "category": "beta_blocker",
+      "wape": 0.143376,
+      "baseline_wape": 0.191925,
+      "n": 11536
+    },
+    {
+      "category": "corticosteroid",
+      "wape": 0.144052,
+      "baseline_wape": 0.187371,
+      "n": 5356
+    },
+    {
+      "category": "antibiotic",
+      "wape": 0.149373,
+      "baseline_wape": 0.194867,
+      "n": 43672
+    },
+    {
+      "category": "bronchodilator",
+      "wape": 0.156571,
+      "baseline_wape": 0.211651,
+      "n": 18951
+    }
+  ],
+  "feature_importance": [
+    {
+      "feature": "rolling_mean_7",
+      "importance": 0.585145
+    },
+    {
+      "feature": "rolling_mean_14",
+      "importance": 0.268429
+    },
+    {
+      "feature": "rolling_mean_30",
+      "importance": 0.059914
+    },
+    {
+      "feature": "expanding_mean",
+      "importance": 0.015671
+    },
+    {
+      "feature": "rolling_max_7",
+      "importance": 0.008326
+    },
+    {
+      "feature": "day_of_month",
+      "importance": 0.007442
+    },
+    {
+      "feature": "rolling_min_14",
+      "importance": 0.007386
+    },
+    {
+      "feature": "month_sin",
+      "importance": 0.004867
+    },
+    {
+      "feature": "month",
+      "importance": 0.004449
+    },
+    {
+      "feature": "month_cos",
+      "importance": 0.003904
+    },
+    {
+      "feature": "season_flu",
+      "importance": 0.0036
+    },
+    {
+      "feature": "daily_consumption",
+      "importance": 0.003172
+    },
+    {
+      "feature": "cumulative_consumption",
+      "importance": 0.003101
+    },
+    {
+      "feature": "days_to_expiry",
+      "importance": 0.002463
+    },
+    {
+      "feature": "rolling_min_30",
+      "importance": 0.002425
+    }
+  ]
+}

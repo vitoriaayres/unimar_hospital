@@ -12,7 +12,6 @@ dependencies = [
     "uvicorn[standard]>=0.29.0",
     "pydantic>=2.6.0",
     "pydantic-settings>=2.2.0",
-    "pydantic-extra-types>=2.5.0",
     "python-dotenv>=1.0.0",
     # Database
     "sqlalchemy[asyncio]>=2.0.25",
@@ -24,28 +23,18 @@ dependencies = [
     "passlib[bcrypt]>=1.7.4",
     "bcrypt>=4.0.0,<4.1.0",
     "python-multipart>=0.0.6",
-    # ML
-    "mlflow>=2.10.0",
+    # ML (base fictícia, treino e previsões)
     "scikit-learn>=1.4.0",
     "lightgbm>=4.2.0",
-    "xgboost>=2.0.0",
-    "optuna>=3.6.0",
     "pandas>=2.2.0",
     "numpy>=1.26.0",
     "polars>=0.19.0",
-    # Async Tasks
-    "celery[redis]>=5.3.0",
-    "redis>=5.0.0",
-    "flower>=2.0.0",
+    "pyyaml>=6.0.1",
+    "faker>=24.0.0",
     # Utils
     "structlog>=24.1.0",
-    "python-json-logger>=2.0.0",
-    "httpx>=0.26.0",
-    "tenacity>=8.2.0",
-    "pyyaml>=6.0.1",
+    "prometheus-client>=0.20.0",
     "email-validator>=2.1.0",
-    "textual>=8.2.8",
-    "requests>=2.32.0",
 ]
 
 [dependency-groups]
@@ -55,7 +44,6 @@ dev = [
     "pytest-cov>=4.1.0",
     "pytest-mock>=3.12.0",
     "httpx>=0.26.0",
-    "faker>=24.0.0",
     "factory-boy>=3.3.0",
     "testcontainers>=4.6.0",
     "ruff>=0.3.0",
@@ -65,6 +53,7 @@ dev = [
     "types-passlib>=1.7.0",
     "types-pyyaml>=6.0.0",
     "aiosqlite>=0.20.0",
+    "matplotlib>=3.11.2",
 ]
 
 
@@ -117,11 +106,7 @@ module = [
     "alembic.*",
     "pydantic.*",
     "fastapi.*",
-    "celery.*",
-    "mlflow.*",
     "lightgbm.*",
-    "xgboost.*",
-    "optuna.*",
     "polars.*",
 ]
 ignore_missing_imports = true

@@ -8,9 +8,20 @@ dias, que reduz a variancia em produtos de baixo volume.
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
+import polars as pl
 
 # Peso do modelo na combinacao (otimizado na validacao temporal, ver ml/train.py)
 BLEND_WEIGHT = 0.5
+
+
+def to_feature_frame(df: pl.DataFrame, feature_cols: list[str]) -> pd.DataFrame:
+    """Matriz de features em pandas (float64) sem depender do pyarrow.
+
+    Todas as features sao numericas; nulos viram NaN, como o LightGBM espera.
+    """
+    values = df.select(pl.col(feature_cols).cast(pl.Float64)).to_numpy()
+    return pd.DataFrame(values, columns=feature_cols)
 
 
 def predict_demand(model, X, blend_weight: float = BLEND_WEIGHT) -> np.ndarray:

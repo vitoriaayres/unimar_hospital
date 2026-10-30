@@ -1,206 +1,148 @@
 'use client';
 
-import React from 'react';
 import { useState } from 'react';
 import Link from 'next/link';
-import { useRouter, useSearchParams } from 'next/navigation';
-import { useAlerts, useAcknowledgeAlert, useBulkAcknowledgeAlerts, Alert, AlertListParams, ALERT_TYPES, ALERT_SEVERITIES, getAlertTypeConfig, getSeverityConfig, formatAlertDate } from '@/hooks/useAlerts';
+import {
+  useAlerts,
+  useAlertCount,
+  useAcknowledgeAlert,
+  useBulkAcknowledgeAlerts,
+  useAlertRules,
+  useUpdateAlertRule,
+  Alert,
+  AlertRule,
+  AlertListParams,
+  ALERT_TYPES,
+  ALERT_SEVERITIES,
+  getAlertTypeConfig,
+  getSeverityConfig,
+  formatAlertDate,
+} from '@/hooks/useAlerts';
+import { useUrlParams } from '@/hooks/useUrlParams';
+import { fetchAllPages } from '@/lib/api';
 import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/Table';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs';
 import { Checkbox } from '@/components/ui/Checkbox';
-import { AlertTriangle, Clock, Package, Check, ChevronLeft, ChevronRight, Loader2, CheckCircle, XCircle, Filter, Download } from 'lucide-react';
-import { cn, formatNumber } from '@/lib/utils';
-import { debounce } from 'lodash-es';
+import { StatCard } from '@/components/ui/StatCard';
+import { Pagination } from '@/components/ui/Pagination';
+import { AlertTriangle, Clock, Info, Check, Loader2, CheckCircle, XCircle, Download } from 'lucide-react';
+import { cn, formatNumber, downloadCsv } from '@/lib/utils';
+
+const RULE_TEXT: Record<AlertRule['alert_type'], { title: string; description: (days: number) => string }> = {
+  shortage_risk: {
+    title: 'Risco de falta',
+    description: (d) => `Avisa quando o estoque previsto acaba em até ${d} dias`,
+  },
+  expiry_risk: {
+    title: 'Risco de validade',
+    description: (d) => `Avisa sobre lotes que vencem em até ${d} dias`,
+  },
+  overstock: {
+    title: 'Excesso de estoque',
+    description: () => 'Avisa quando o estoque passa de 120% do nível máximo do produto',
+  },
+  reorder_point: {
+    title: 'Ponto de reposição',
+    description: () => 'Avisa quando o estoque chega ao nível mínimo do produto',
+  },
+};
 
 export default function AlertsPage() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const [alertType, setAlertType] = useState(searchParams.get('alertType') || '');
-  const [severity, setSeverity] = useState(searchParams.get('severity') || '');
-  const [acknowledged, setAcknowledged] = useState(searchParams.get('acknowledged') === 'true' ? 'true' : searchParams.get('acknowledged') === 'false' ? 'false' : '');
-  const [page, setPage] = useState(Number(searchParams.get('page')) || 1);
+  const url = useUrlParams();
+  const alertType = url.get('alertType');
+  const severity = url.get('severity');
+  const acknowledged = url.get('acknowledged');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [selectAll, setSelectAll] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
-  const params: AlertListParams = {
-    page,
-    size: 20,
+  const filters: Omit<AlertListParams, 'page' | 'size'> = {
     alert_type: alertType || undefined,
     severity: severity || undefined,
     acknowledged: acknowledged === 'true' ? true : acknowledged === 'false' ? false : undefined,
   };
 
-  const { data, isLoading, error, refetch } = useAlerts(params);
+  const { data, isLoading, isFetching } = useAlerts({ ...filters, page: url.page, size: 20 });
   const acknowledgeMutation = useAcknowledgeAlert();
   const bulkAcknowledgeMutation = useBulkAcknowledgeAlerts();
 
-  const handleFilterChange = (key: string, value: string) => {
-    const params = new URLSearchParams(searchParams);
-    if (value) params.set(key, value);
-    else params.delete(key);
-    params.set('page', '1');
-    router.push(`/alerts?${params.toString()}`);
+  // Contagens de todos os pendentes (não só da página atual)
+  const criticalCount = useAlertCount({ acknowledged: false, severity: 'critical' });
+  const warningCount = useAlertCount({ acknowledged: false, severity: 'warning' });
+  const infoCount = useAlertCount({ acknowledged: false, severity: 'info' });
+  const pendingCount = useAlertCount({ acknowledged: false });
+
+  const pendingOnPage = data?.items.filter((a) => !a.acknowledged) ?? [];
+  const allSelected = pendingOnPage.length > 0 && pendingOnPage.every((a) => selectedIds.includes(a.id));
+  const isPending = acknowledgeMutation.isPending || bulkAcknowledgeMutation.isPending;
+
+  const setFilter = (key: string, value: string) => {
+    url.set({ [key]: value });
     setSelectedIds([]);
-    setSelectAll(false);
-  };
-
-  const handlePageChange = (newPage: number) => {
-    setPage(newPage);
-    const params = new URLSearchParams(searchParams);
-    params.set('page', newPage.toString());
-    router.push(`/alerts?${params.toString()}`);
-    setSelectedIds([]);
-    setSelectAll(false);
-  };
-
-  const handleSelectAll = (checked: boolean) => {
-    setSelectAll(checked);
-    if (checked && data) {
-      setSelectedIds(data.items.map(a => a.id));
-    } else {
-      setSelectedIds([]);
-    }
-  };
-
-  const handleSelectOne = (id: string, checked: boolean) => {
-    if (checked) {
-      setSelectedIds(prev => [...prev, id]);
-    } else {
-      setSelectedIds(prev => prev.filter(i => i !== id));
-      setSelectAll(false);
-    }
-  };
-
-  const handleAcknowledge = async (id: string) => {
-    try {
-      await acknowledgeMutation.mutateAsync(id);
-    } catch (err) {
-      console.error('Erro ao reconhecer alerta:', err);
-    }
   };
 
   const handleBulkAcknowledge = async () => {
-    if (selectedIds.length === 0) return;
+    if (!selectedIds.length) return;
+    await bulkAcknowledgeMutation.mutateAsync(selectedIds);
+    setSelectedIds([]);
+  };
+
+  const handleExport = async () => {
+    setExporting(true);
     try {
-      await bulkAcknowledgeMutation.mutateAsync(selectedIds);
-      setSelectedIds([]);
-      setSelectAll(false);
-    } catch (err) {
-      console.error('Erro ao reconhecer alertas em lote:', err);
+      const rows = await fetchAllPages<Alert>('/alerts', filters);
+      downloadCsv(
+        `alertas-${new Date().toISOString().slice(0, 10)}.csv`,
+        [
+          { header: 'Data', value: (a: Alert) => formatAlertDate(a.created_at) },
+          { header: 'SKU', value: (a: Alert) => a.product?.sku },
+          { header: 'Produto', value: (a: Alert) => a.product?.name },
+          { header: 'Tipo', value: (a: Alert) => getAlertTypeConfig(a.alert_type).label },
+          { header: 'Severidade', value: (a: Alert) => getSeverityConfig(a.severity).label },
+          { header: 'Mensagem', value: (a: Alert) => a.message },
+          { header: 'Status', value: (a: Alert) => (a.acknowledged ? 'Reconhecido' : 'Pendente') },
+        ],
+        rows
+      );
+    } finally {
+      setExporting(false);
     }
   };
 
-  const isPending = acknowledgeMutation.isPending || bulkAcknowledgeMutation.isPending;
-
-  if (isLoading && !data) {
-    return (
-      <div className="p-6">
-        <Card>
-          <CardContent className="py-12 text-center">
-            <Loader2 className="h-8 w-8 animate-spin mx-auto text-primary mb-2" />
-            <p className="text-muted-foreground">Carregando alertas...</p>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-  const stats = React.useMemo(() => {
-    if (!data) return { critical: 0, warning: 0, info: 0, unacknowledged: 0 };
-    return {
-      critical: data.items.filter(a => a.severity === 'critical').length,
-      warning: data.items.filter(a => a.severity === 'warning').length,
-      info: data.items.filter(a => a.severity === 'info').length,
-      unacknowledged: data.items.filter(a => !a.acknowledged).length,
-    };
-  }, [data]);
-
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="space-y-6 p-4 lg:p-6">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Alertas</h1>
-          <p className="text-muted-foreground">Monitoramento de riscos de estoque e validades</p>
+          <p className="text-muted-foreground">Riscos de falta, validade e excesso de estoque</p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm">
-            <Download className="mr-2 h-4 w-4" />
-            Exportar
-          </Button>
-        </div>
+        <Button variant="outline" size="sm" onClick={handleExport} disabled={exporting || !data?.total}>
+          {exporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+          Exportar CSV
+        </Button>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-4">
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Críticos</p>
-                <p className="text-3xl font-bold text-destructive">{stats.critical}</p>
-              </div>
-              <div className="p-3 rounded-full bg-destructive/10">
-                <AlertTriangle className="h-6 w-6 text-destructive" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Atenção</p>
-                <p className="text-3xl font-bold text-amber-600">{stats.warning}</p>
-              </div>
-              <div className="p-3 rounded-full bg-amber-100">
-                <AlertTriangle className="h-6 w-6 text-amber-600" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Informativos</p>
-                <p className="text-3xl font-bold text-primary">{stats.info}</p>
-              </div>
-              <div className="p-3 rounded-full bg-primary/10">
-                <Package className="h-6 w-6 text-primary" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Não Reconhecidos</p>
-                <p className="text-3xl font-bold">{stats.unacknowledged}</p>
-              </div>
-              <div className="p-3 rounded-full bg-muted">
-                <Clock className="h-6 w-6 text-muted-foreground" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard name="Críticos pendentes" value={formatNumber(criticalCount.data ?? 0)} icon={AlertTriangle} color="text-destructive bg-destructive/10" valueClassName="text-destructive" loading={criticalCount.isLoading} />
+        <StatCard name="Atenção pendentes" value={formatNumber(warningCount.data ?? 0)} icon={AlertTriangle} color="text-amber-600 bg-amber-100" valueClassName="text-amber-600" loading={warningCount.isLoading} />
+        <StatCard name="Informativos pendentes" value={formatNumber(infoCount.data ?? 0)} icon={Info} loading={infoCount.isLoading} />
+        <StatCard name="Total pendente" value={formatNumber(pendingCount.data ?? 0)} icon={Clock} color="text-muted-foreground bg-muted" loading={pendingCount.isLoading} />
       </div>
 
       <Tabs defaultValue="list" className="space-y-4">
         <TabsList>
-          <TabsTrigger value="list">Lista de Alertas</TabsTrigger>
-          <TabsTrigger value="rules">Regras de Alerta</TabsTrigger>
+          <TabsTrigger value="list">Lista de alertas</TabsTrigger>
+          <TabsTrigger value="rules">Regras</TabsTrigger>
         </TabsList>
 
         <TabsContent value="list">
           <Card>
             <CardHeader className="pb-2">
-              <div className="flex flex-col sm:flex-row gap-4">
-                <Select value={alertType} onValueChange={(v) => handleFilterChange('alertType', v)}>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                <Select value={alertType} onValueChange={(v) => setFilter('alertType', v)}>
                   <SelectTrigger className="w-full sm:w-[200px]">
                     <SelectValue placeholder="Todos os tipos" />
                   </SelectTrigger>
@@ -211,135 +153,112 @@ export default function AlertsPage() {
                     ))}
                   </SelectContent>
                 </Select>
-                <Select value={severity} onValueChange={(v) => handleFilterChange('severity', v)}>
+                <Select value={severity} onValueChange={(v) => setFilter('severity', v)}>
                   <SelectTrigger className="w-full sm:w-[180px]">
-                    <SelectValue placeholder="Todas severidades" />
+                    <SelectValue placeholder="Todas as severidades" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">Todas severidades</SelectItem>
+                    <SelectItem value="">Todas as severidades</SelectItem>
                     {ALERT_SEVERITIES.map((s) => (
                       <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
-                <Select value={acknowledged} onValueChange={(v) => handleFilterChange('acknowledged', v)}>
+                <Select value={acknowledged} onValueChange={(v) => setFilter('acknowledged', v)}>
                   <SelectTrigger className="w-full sm:w-[180px]">
-                    <SelectValue placeholder="Status" />
+                    <SelectValue placeholder="Todos os status" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">Todos</SelectItem>
-                    <SelectItem value="false">Não reconhecidos</SelectItem>
+                    <SelectItem value="">Todos os status</SelectItem>
+                    <SelectItem value="false">Pendentes</SelectItem>
                     <SelectItem value="true">Reconhecidos</SelectItem>
                   </SelectContent>
                 </Select>
+                {isFetching && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+                {selectedIds.length > 0 && (
+                  <Button size="sm" onClick={handleBulkAcknowledge} disabled={isPending} className="bg-green-600 hover:bg-green-700 sm:ml-auto">
+                    <CheckCircle className="mr-2 h-4 w-4" />
+                    Reconhecer {selectedIds.length} selecionado{selectedIds.length !== 1 ? 's' : ''}
+                  </Button>
+                )}
               </div>
             </CardHeader>
             <CardContent>
-              {data?.items.length === 0 ? (
-                <div className="text-center py-12">
-                  <AlertTriangle className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                  <h3 className="text-lg font-medium mb-1">Nenhum alerta encontrado</h3>
+              {isLoading ? (
+                <div className="py-12 text-center">
+                  <Loader2 className="mx-auto mb-2 h-8 w-8 animate-spin text-primary" />
+                  <p className="text-muted-foreground">Carregando alertas...</p>
+                </div>
+              ) : !data?.items.length ? (
+                <div className="py-12 text-center">
+                  <CheckCircle className="mx-auto mb-4 h-12 w-12 text-green-600" />
+                  <h3 className="mb-1 text-lg font-medium">Nenhum alerta encontrado</h3>
                   <p className="text-muted-foreground">
                     {alertType || severity || acknowledged ? 'Tente ajustar os filtros' : 'Sistema sem alertas no momento'}
                   </p>
                 </div>
               ) : (
                 <>
-                  <div className="flex items-center justify-between mb-4">
-                    <p className="text-sm text-muted-foreground">
-                      {data?.total ?? 0} alerta{data?.total !== 1 ? 's' : ''} encontrado{data?.total !== 1 ? 's' : ''}
-                    </p>
-                    {selectedIds.length > 0 && (
-                      <Button
-                        variant="default"
-                        size="sm"
-                        onClick={handleBulkAcknowledge}
-                        disabled={isPending}
-                        className="bg-green-600 hover:bg-green-700"
-                      >
-                        <CheckCircle className="mr-2 h-4 w-4" />
-                        Reconhecer {selectedIds.length} selecionado{selectedIds.length !== 1 ? 's' : ''}
-                      </Button>
-                    )}
-                  </div>
-
                   <div className="overflow-x-auto">
                     <Table>
                       <TableHeader>
                         <TableRow>
-                          <TableHead className="w-12">
+                          <TableHead className="w-10">
                             <Checkbox
-                              checked={selectAll}
-                              onCheckedChange={handleSelectAll}
-                              disabled={data?.items.length === 0}
-                              aria-label="Selecionar todos"
+                              checked={allSelected}
+                              onCheckedChange={(c) => setSelectedIds(c ? pendingOnPage.map((a) => a.id) : [])}
+                              disabled={!pendingOnPage.length}
+                              aria-label="Selecionar pendentes da página"
                             />
                           </TableHead>
                           <TableHead>Produto</TableHead>
                           <TableHead>Tipo</TableHead>
                           <TableHead>Severidade</TableHead>
-                          <TableHead>Mensagem</TableHead>
-                          <TableHead>Data</TableHead>
+                          <TableHead className="hidden lg:table-cell">Mensagem</TableHead>
+                          <TableHead className="hidden md:table-cell">Data</TableHead>
                           <TableHead>Status</TableHead>
-                          <TableHead className="w-32">Ações</TableHead>
+                          <TableHead className="w-32" />
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {data?.items.map((alert) => {
-                          const typeConfig = getAlertTypeConfig(alert.alert_type);
+                        {data.items.map((alert) => {
                           const severityConfig = getSeverityConfig(alert.severity);
                           return (
                             <TableRow key={alert.id} className={cn('hover:bg-muted/50', alert.acknowledged && 'opacity-60')}>
                               <TableCell>
                                 <Checkbox
                                   checked={selectedIds.includes(alert.id)}
-                                  onCheckedChange={(checked) => handleSelectOne(alert.id, checked as boolean)}
+                                  onCheckedChange={(c) =>
+                                    setSelectedIds((prev) => (c ? [...prev, alert.id] : prev.filter((i) => i !== alert.id)))
+                                  }
                                   disabled={alert.acknowledged}
+                                  aria-label="Selecionar alerta"
                                 />
                               </TableCell>
                               <TableCell>
-                                <div>
-                                  <p className="font-medium">{alert.product?.name || 'Produto não encontrado'}</p>
-                                  <p className="text-xs text-muted-foreground font-mono">{alert.product?.sku}</p>
-                                </div>
+                                <Link href={`/products/${alert.product_id}`} className="font-medium hover:underline">
+                                  {alert.product?.name ?? 'Produto não encontrado'}
+                                </Link>
+                                <p className="font-mono text-xs text-muted-foreground">{alert.product?.sku}</p>
                               </TableCell>
                               <TableCell>
-                                <Badge variant="secondary" className="text-xs">
-                                  {typeConfig.label}
-                                </Badge>
+                                <Badge variant="secondary" className="whitespace-nowrap text-xs">{getAlertTypeConfig(alert.alert_type).label}</Badge>
                               </TableCell>
                               <TableCell>
-                                <Badge variant={severityConfig.color as any} className="text-xs font-medium">
-                                  {severityConfig.label}
-                                </Badge>
+                                <Badge variant={severityConfig.color as 'info'} className="text-xs">{severityConfig.label}</Badge>
                               </TableCell>
-                              <TableCell className="max-w-md">
-                                <p className="text-sm">{alert.message}</p>
-                              </TableCell>
-                              <TableCell className="text-sm text-muted-foreground">
-                                {formatAlertDate(alert.created_at)}
-                              </TableCell>
+                              <TableCell className="hidden max-w-md text-sm lg:table-cell">{alert.message}</TableCell>
+                              <TableCell className="hidden whitespace-nowrap text-sm text-muted-foreground md:table-cell">{formatAlertDate(alert.created_at)}</TableCell>
                               <TableCell>
                                 {alert.acknowledged ? (
-                                  <Badge variant="success" className="text-xs">
-                                    <CheckCircle className="mr-1 h-3 w-3" />
-                                    Reconhecido
-                                  </Badge>
+                                  <Badge variant="success" className="text-xs"><CheckCircle className="mr-1 h-3 w-3" />Reconhecido</Badge>
                                 ) : (
-                                  <Badge variant="destructive" className="text-xs">
-                                    <XCircle className="mr-1 h-3 w-3" />
-                                    Pendente
-                                  </Badge>
+                                  <Badge variant="destructive" className="text-xs"><XCircle className="mr-1 h-3 w-3" />Pendente</Badge>
                                 )}
                               </TableCell>
                               <TableCell>
                                 {!alert.acknowledged && (
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => handleAcknowledge(alert.id)}
-                                    disabled={isPending}
-                                  >
+                                  <Button variant="outline" size="sm" onClick={() => acknowledgeMutation.mutate(alert.id)} disabled={isPending}>
                                     <Check className="mr-1 h-3 w-3" />
                                     Reconhecer
                                   </Button>
@@ -351,32 +270,16 @@ export default function AlertsPage() {
                       </TableBody>
                     </Table>
                   </div>
-
-                  {data && data.pages > 1 && (
-                    <div className="flex items-center justify-between mt-4">
-                      <p className="text-sm text-muted-foreground">
-                        Página {data.page} de {data.pages} — {data.total} alertas
-                      </p>
-                      <div className="flex items-center gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handlePageChange(page - 1)}
-                          disabled={page <= 1}
-                        >
-                          <ChevronLeft className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handlePageChange(page + 1)}
-                          disabled={page >= data.pages}
-                        >
-                          <ChevronRight className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </div>
-                  )}
+                  <Pagination
+                    page={data.page}
+                    pages={data.pages}
+                    total={data.total}
+                    label="alertas"
+                    onPageChange={(p) => {
+                      url.set({ page: p }, { resetPage: false });
+                      setSelectedIds([]);
+                    }}
+                  />
                 </>
               )}
             </CardContent>
@@ -384,93 +287,51 @@ export default function AlertsPage() {
         </TabsContent>
 
         <TabsContent value="rules">
-          <Card>
-            <CardHeader>
-              <CardTitle>Configuração de Regras de Alerta</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-muted-foreground mb-6">
-                Configure os limites para geração automática de alertas. As regras são avaliadas a cada 15 minutos.
-              </p>
-              <div className="space-y-4">
-                <AlertRuleCard
-                  title="Risco de Falta (Crítico)"
-                  description="Alerta quando estoque projetado para acabar em 3 dias ou menos"
-                  severity="critical"
-                  threshold="3 dias"
-                  enabled={true}
-                />
-                <AlertRuleCard
-                  title="Risco de Falta (Atenção)"
-                  description="Alerta quando estoque projetado para acabar entre 4 e 7 dias"
-                  severity="warning"
-                  threshold="7 dias"
-                  enabled={true}
-                />
-                <AlertRuleCard
-                  title="Risco de Validade"
-                  description="Alerta para lotes com validade entre 15 e 30 dias"
-                  severity="warning"
-                  threshold="30 dias"
-                  enabled={true}
-                />
-                <AlertRuleCard
-                  title="Excesso de Estoque"
-                  description="Alerta quando estoque atual excede 40% do nível máximo"
-                  severity="info"
-                  threshold="40% acima do máx."
-                  enabled={true}
-                />
-                <AlertRuleCard
-                  title="Ponto de Reposição"
-                  description="Alerta quando estoque atinge o nível mínimo configurado no produto"
-                  severity="info"
-                  threshold="Nível mínimo"
-                  enabled={false}
-                />
-              </div>
-            </CardContent>
-          </Card>
+          <AlertRules />
         </TabsContent>
       </Tabs>
     </div>
   );
 }
 
-function AlertRuleCard({ title, description, severity, threshold, enabled }: {
-  title: string;
-  description: string;
-  severity: 'critical' | 'warning' | 'info';
-  threshold: string;
-  enabled: boolean;
-}) {
-  const severityColors = {
-    critical: 'bg-destructive/10 text-destructive border-destructive/20',
-    warning: 'bg-amber-100 text-amber-800 border-amber-200',
-    info: 'bg-primary/10 text-primary border-primary/20',
-  };
+function AlertRules() {
+  const { data: rules, isLoading } = useAlertRules();
+  const updateRule = useUpdateAlertRule();
 
   return (
-    <div className="flex items-center justify-between p-4 rounded-lg border">
-      <div className="flex items-center gap-4">
-        <Badge variant={severity as any} className={cn('text-xs', severityColors[severity])}>
-          {severity === 'critical' ? 'Crítico' : severity === 'warning' ? 'Atenção' : 'Info'}
-        </Badge>
-        <div>
-          <p className="font-medium">{title}</p>
-          <p className="text-sm text-muted-foreground">{description}</p>
-        </div>
-      </div>
-      <div className="flex items-center gap-4">
-        <div className="text-right">
-          <p className="text-sm text-muted-foreground">Limite</p>
-          <p className="font-mono font-medium">{threshold}</p>
-        </div>
-        <label className="flex items-center gap-2 cursor-pointer">
-          <input type="checkbox" defaultChecked={enabled} className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary" />
-          <span className="text-sm">Ativo</span>
-        </label>
-      </div>
-    </div>
+    <Card>
+      <CardHeader>
+        <CardTitle>Regras de alerta</CardTitle>
+        <p className="text-sm text-muted-foreground">
+          Ative ou desative cada tipo de alerta. As alterações valem até o servidor ser reiniciado.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {isLoading && <Loader2 className="mx-auto h-6 w-6 animate-spin text-primary" />}
+        {rules?.map((rule) => {
+          const text = RULE_TEXT[rule.alert_type];
+          const severityConfig = getSeverityConfig(rule.severity);
+          return (
+            <div key={rule.id} className="flex flex-col gap-3 rounded-lg border p-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-4">
+                <Badge variant={severityConfig.color as 'info'} className="w-20 justify-center text-xs">{severityConfig.label}</Badge>
+                <div>
+                  <p className="font-medium">{text?.title ?? rule.alert_type}</p>
+                  <p className="text-sm text-muted-foreground">{text?.description(rule.threshold_days)}</p>
+                </div>
+              </div>
+              <label className="flex cursor-pointer items-center gap-2 text-sm">
+                <Checkbox
+                  checked={rule.enabled}
+                  disabled={updateRule.isPending}
+                  onCheckedChange={(c) => updateRule.mutate({ id: rule.id, data: { enabled: !!c } })}
+                />
+                Ativa
+              </label>
+            </div>
+          );
+        })}
+      </CardContent>
+    </Card>
   );
 }

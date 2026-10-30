@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import and_, func, select
@@ -10,7 +11,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user, get_db
 from app.models import (
     Alert,
-    AlertType,
     BatchStatus,
     Consumption,
     Department,
@@ -67,12 +67,12 @@ async def get_kpis(
         or 0
     )
 
-    # Stockout risk count (simplified)
+    # Risco de falta: estoque disponivel nao cobre a previsao dos proximos 7 dias
     stockout_risk_count = (
         await db.scalar(
-            select(func.count(Alert.id)).where(
-                and_(Alert.alert_type == AlertType.SHORTAGE_RISK, Alert.acknowledged.is_(False))
-            )
+            select(func.count(Prediction.id))
+            .join(Product, Prediction.product_id == Product.id)
+            .where(and_(Product.is_active.is_(True), low_stock_subq < Prediction.predicted_quantity))
         )
         or 0
     )
@@ -83,6 +83,7 @@ async def get_kpis(
             select(func.count(InventoryBatch.id)).where(
                 and_(
                     InventoryBatch.status == BatchStatus.AVAILABLE,
+                    InventoryBatch.quantity > 0,
                     InventoryBatch.expiry_date <= func.current_date() + 30,
                     InventoryBatch.expiry_date >= func.current_date(),
                 )
@@ -189,12 +190,16 @@ async def get_stockout_risk(
             )
             <= Product.max_stock_level
         )
+        # Menor cobertura primeiro: estoque / previsao de 7 dias
         .order_by(
-            func.coalesce(
-                func.sum(InventoryBatch.quantity).filter(
-                    InventoryBatch.status == BatchStatus.AVAILABLE
-                ),
-                0,
+            (
+                func.coalesce(
+                    func.sum(InventoryBatch.quantity).filter(
+                        InventoryBatch.status == BatchStatus.AVAILABLE
+                    ),
+                    0,
+                )
+                / func.greatest(func.coalesce(Prediction.predicted_quantity, 0), 1)
             ).asc()
         )
         .limit(limit)
@@ -276,6 +281,7 @@ async def get_expiry_timeline(
         .where(
             and_(
                 InventoryBatch.status == BatchStatus.AVAILABLE,
+                InventoryBatch.quantity > 0,
                 InventoryBatch.expiry_date <= func.current_date() + days_ahead,
                 InventoryBatch.expiry_date >= func.current_date(),
             )
@@ -317,61 +323,54 @@ async def get_consumption_trends(
     current_user: Annotated[User, Depends(get_current_user)],
     days_back: int = Query(default=30, ge=1, le=365),
     department: Department | None = None,
+    product_id: UUID | None = None,
 ) -> list[ConsumptionTrendPoint]:
+    from collections import defaultdict
     from datetime import timedelta
 
     start_date = date.today() - timedelta(days=days_back)
 
-    query = select(
-        Consumption.consumption_date,
-        func.sum(Consumption.quantity).label('total_quantity'),
-    ).where(
-        and_(
-            Consumption.consumption_date >= start_date,
-            Consumption.consumption_date <= date.today(),
-        )
-    )
-
+    filters = [
+        Consumption.consumption_date >= start_date,
+        Consumption.consumption_date <= date.today(),
+    ]
     if department:
-        query = query.where(Consumption.department == department)
+        filters.append(Consumption.department == department)
+    if product_id:
+        filters.append(Consumption.product_id == product_id)
 
-    query = query.group_by(Consumption.consumption_date).order_by(
-        Consumption.consumption_date.asc()
+    # Tres consultas agrupadas (total, por departamento, por categoria)
+    totals = await db.execute(
+        select(Consumption.consumption_date, func.sum(Consumption.quantity))
+        .where(and_(*filters))
+        .group_by(Consumption.consumption_date)
+        .order_by(Consumption.consumption_date.asc())
     )
+    by_dept: dict[date, dict[str, int]] = defaultdict(dict)
+    for day, dept, qty in await db.execute(
+        select(Consumption.consumption_date, Consumption.department, func.sum(Consumption.quantity))
+        .where(and_(*filters))
+        .group_by(Consumption.consumption_date, Consumption.department)
+    ):
+        by_dept[day][dept.value] = qty
+    by_cat: dict[date, dict[str, int]] = defaultdict(dict)
+    for day, category, qty in await db.execute(
+        select(Consumption.consumption_date, Product.category, func.sum(Consumption.quantity))
+        .join(Product, Consumption.product_id == Product.id)
+        .where(and_(*filters))
+        .group_by(Consumption.consumption_date, Product.category)
+    ):
+        by_cat[day][category.value] = qty
 
-    result = await db.execute(query)
-    rows = result.all()
-
-    trends = []
-    for row in rows:
-        # Get breakdown by department and category
-        dept_query = (
-            select(Consumption.department, func.sum(Consumption.quantity))
-            .where(Consumption.consumption_date == row.consumption_date)
-            .group_by(Consumption.department)
+    return [
+        ConsumptionTrendPoint(
+            date=day,
+            total_quantity=total,
+            by_department=by_dept[day],
+            by_category=by_cat[day],
         )
-        dept_result = await db.execute(dept_query)
-        by_dept = {str(r.department): r[1] for r in dept_result.all()}
-
-        cat_query = (
-            select(Product.category, func.sum(Consumption.quantity))
-            .join(Product, Consumption.product_id == Product.id)
-            .where(Consumption.consumption_date == row.consumption_date)
-            .group_by(Product.category)
-        )
-        cat_result = await db.execute(cat_query)
-        by_cat = {str(r.category): r[1] for r in cat_result.all()}
-
-        trends.append(
-            ConsumptionTrendPoint(
-                date=row.consumption_date,
-                total_quantity=row.total_quantity,
-                by_department=by_dept,
-                by_category=by_cat,
-            )
-        )
-
-    return trends
+        for day, total in totals
+    ]
 
 
 @router.get('', response_model=DashboardResponse, summary='Get full dashboard data')
@@ -382,9 +381,18 @@ async def get_dashboard(
     from datetime import datetime
 
     kpis = await get_kpis(db, current_user)
-    stockout_risks = await get_stockout_risk(db, current_user)
-    expiry_timeline = await get_expiry_timeline(db, current_user)
-    consumption_trends = await get_consumption_trends(db, current_user)
+
+    stockout_risks = await get_stockout_risk(
+        db, current_user, limit=20
+    )
+
+    expiry_timeline = await get_expiry_timeline(
+        db, current_user, days_ahead=90, limit=50
+    )
+
+    consumption_trends = await get_consumption_trends(
+        db, current_user, days_back=30
+    )
 
     return DashboardResponse(
         kpis=kpis,
@@ -393,3 +401,4 @@ async def get_dashboard(
         consumption_trends=consumption_trends,
         generated_at=datetime.utcnow().isoformat(),
     )
+

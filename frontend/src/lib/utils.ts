@@ -5,23 +5,55 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export function formatCurrency(value: number): string {
+export function formatCurrency(value: number | string | null | undefined): string {
+  const num = typeof value === 'string' ? Number(value) : (value ?? 0);
+  if (!Number.isFinite(num)) {
+    return 'R$ 0,00';
+  }
+  return num
+    .toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+    .replace(/\u00A0/g, ' ')
+    .replace(/\u202F/g, ' ');
+}
+
+/** Valor curto para cards: R$ 8,9 mi */
+export function formatCurrencyCompact(value: number | string | null | undefined): string {
+  const num = typeof value === 'string' ? Number(value) : (value ?? 0);
+  if (!Number.isFinite(num)) {
+    return 'R$ 0';
+  }
   return new Intl.NumberFormat('pt-BR', {
     style: 'currency',
     currency: 'BRL',
-  }).format(value);
+    notation: 'compact',
+    maximumFractionDigits: 1,
+  })
+    .format(num)
+    .replace(/ /g, ' ');
 }
 
 export function formatNumber(value: number): string {
   return new Intl.NumberFormat('pt-BR').format(value);
 }
 
+
 export function formatDate(date: string | Date): string {
+  if (typeof date === 'string') {
+    const match = date.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+
+    if (match) {
+      return `${match[3]}/${match[2]}/${match[1]}`;
+    }
+  }
+
+  const parsedDate = date instanceof Date ? date : new Date(date);
+
   return new Intl.DateTimeFormat('pt-BR', {
+    timeZone: 'UTC',
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
-  }).format(new Date(date));
+  }).format(parsedDate);
 }
 
 export function formatDateTime(date: string | Date): string {
@@ -111,4 +143,27 @@ export const CATEGORY_LABELS: Record<string, string> = {
 
 export function getCategoryLabel(category: string): string {
   return CATEGORY_LABELS[category] || category;
+}
+
+/** Baixa um CSV (separador ';' e BOM, para o Excel em português abrir certo). */
+export function downloadCsv(
+  filename: string,
+  columns: { header: string; value: (row: any) => unknown }[],
+  rows: unknown[]
+): void {
+  const escape = (v: unknown) => {
+    const s = v === null || v === undefined ? '' : String(v);
+    return /[";\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const lines = [
+    columns.map((c) => escape(c.header)).join(';'),
+    ...rows.map((row) => columns.map((c) => escape(c.value(row))).join(';')),
+  ];
+  const blob = new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
 }

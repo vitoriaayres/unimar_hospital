@@ -45,11 +45,10 @@ class Database:
             autoflush=False,
         )
 
-    def disconnect(self) -> None:
+    
+    async def disconnect(self) -> None:
         if self._engine is not None:
-            import asyncio
-
-            asyncio.run(self._engine.dispose())
+            await self._engine.dispose()
             self._engine = None
             self._session_factory = None
 
@@ -100,5 +99,5 @@ async def init_db() -> None:
         await database.create_all()
 
 
-async def close_db() -> None:
-    database.disconnect()
+async def close_db():
+    await database.disconnect()

@@ -1,108 +1,108 @@
 'use client';
 
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Area, BarChart as RechartsBarChart, Bar } from 'recharts';
-import { cn } from '@/lib/utils';
+import {
+  Area,
+  Bar,
+  BarChart as RechartsBarChart,
+  CartesianGrid,
+  ComposedChart,
+  Legend,
+  Line,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
+import { cn, formatNumber } from '@/lib/utils';
+
+export const BRAND_BLUE = '#193D6F';
+export const BRAND_TEAL = '#12A89D';
+
+const tooltipStyle = {
+  backgroundColor: 'hsl(var(--card))',
+  border: '1px solid hsl(var(--border))',
+  borderRadius: '8px',
+};
+
+function shortDate(value: string) {
+  return new Date(value + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+}
 
 interface ForecastChartProps {
+  /** Pontos com consumo real (histórico) e/ou previsão com faixa esperada */
   data: Array<{
     date: string;
     actual?: number | null;
-    predicted: number;
-    lower?: number;
-    upper?: number;
+    predicted?: number | null;
+    lower?: number | null;
+    upper?: number | null;
   }>;
   className?: string;
   height?: number;
-  showActual?: boolean;
 }
 
-export function ForecastChart({ data, className, height = 300, showActual = true }: ForecastChartProps) {
+export function ForecastChart({ data, className, height = 300 }: ForecastChartProps) {
   if (!data.length) {
     return (
-      <div className={cn('flex items-center justify-center h-[300px]', className)}>
+      <div className={cn('flex items-center justify-center', className)} style={{ height }}>
         <p className="text-muted-foreground">Nenhum dado disponível para exibição</p>
       </div>
     );
   }
 
+  // Area com par [mínimo, máximo] desenha só a faixa entre os dois
+  const rows = data.map((d) => ({
+    ...d,
+    range: d.lower != null && d.upper != null ? [d.lower, d.upper] : null,
+  }));
+  const hasActual = data.some((d) => d.actual != null);
+  const hasPredicted = data.some((d) => d.predicted != null);
+
   return (
     <div className={cn('w-full', className)}>
       <ResponsiveContainer width="100%" height={height}>
-        <LineChart data={data} margin={{ top: 20, right: 30, left: 0, bottom: 0 }}>
+        <ComposedChart data={rows} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-          <XAxis
-            dataKey="date"
-            tickFormatter={(value) => new Date(value).toLocaleDateString('pt-BR', { month: 'short', day: '2-digit' })}
-            tick={{ fontSize: 12 }}
-            interval="preserveStartEnd"
-          />
-          <YAxis tick={{ fontSize: 12 }} />
+          <XAxis dataKey="date" tickFormatter={shortDate} tick={{ fontSize: 12 }} interval="preserveStartEnd" minTickGap={24} />
+          <YAxis tick={{ fontSize: 12 }} tickFormatter={(v) => formatNumber(v)} width={56} />
           <Tooltip
-            formatter={(value: number, name: string) => [
-              value.toLocaleString('pt-BR'),
-              name === 'actual' ? 'Consumo Real' : name === 'predicted' ? 'Previsão' : 'Intervalo',
-            ]}
-            labelFormatter={(value) => new Date(value).toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: 'short' })}
-            contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '8px' }}
+            formatter={(value: number | number[], name: string) =>
+              Array.isArray(value)
+                ? [`${formatNumber(Math.round(value[0]))} – ${formatNumber(Math.round(value[1]))}`, name]
+                : [formatNumber(Math.round(value)), name]
+            }
+            labelFormatter={(v) =>
+              new Date(v + 'T00:00:00').toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: 'short' })
+            }
+            contentStyle={tooltipStyle}
           />
           <Legend />
-          {showActual && (
-            <Line
-              type="monotone"
-              dataKey="actual"
-              stroke="hsl(var(--muted-foreground))"
-              strokeWidth={2}
-              strokeDasharray="5 5"
-              dot={false}
-              name="Consumo Real"
-            />
+          {hasPredicted && (
+            <Area type="monotone" dataKey="range" name="Faixa esperada" stroke="none" fill={BRAND_TEAL} fillOpacity={0.15} />
           )}
-          <Area
-            type="monotone"
-            dataKey="lower"
-            stroke="hsl(var(--primary))"
-            fill="hsl(var(--primary))"
-            fillOpacity={0.1}
-            strokeWidth={0}
-            name="Intervalo de Confiança"
-          />
-          <Area
-            type="monotone"
-            dataKey="upper"
-            stroke="hsl(var(--primary))"
-            fill="hsl(var(--primary))"
-            fillOpacity={0.1}
-            strokeWidth={0}
-          />
-          <Line
-            type="monotone"
-            dataKey="predicted"
-            stroke="hsl(var(--primary))"
-            strokeWidth={2}
-            dot={false}
-            name="Previsão"
-          />
-        </LineChart>
+          {hasActual && (
+            <Line type="monotone" dataKey="actual" name="Consumo real" stroke={BRAND_BLUE} strokeWidth={2} dot={false} connectNulls={false} />
+          )}
+          {hasPredicted && (
+            <Line type="monotone" dataKey="predicted" name="Previsão" stroke={BRAND_TEAL} strokeWidth={2} strokeDasharray="5 4" dot={false} />
+          )}
+        </ComposedChart>
       </ResponsiveContainer>
     </div>
   );
 }
 
 interface BarChartProps {
-  data: Array<{
-    name: string;
-    value: number;
-    color?: string;
-  }>;
+  data: Array<{ name: string; value: number }>;
   className?: string;
   height?: number;
-  indexBy?: string;
+  unit?: string;
 }
 
-export function BarChart({ data, className, height = 300, indexBy = 'name' }: BarChartProps) {
+export function BarChart({ data, className, height = 300, unit = 'unidades' }: BarChartProps) {
   if (!data.length) {
     return (
-      <div className={cn('flex items-center justify-center h-[300px]', className)}>
+      <div className={cn('flex items-center justify-center', className)} style={{ height }}>
         <p className="text-muted-foreground">Nenhum dado disponível</p>
       </div>
     );
@@ -111,19 +111,14 @@ export function BarChart({ data, className, height = 300, indexBy = 'name' }: Ba
   return (
     <div className={cn('w-full', className)}>
       <ResponsiveContainer width="100%" height={height}>
-        <RechartsBarChart data={data} layout="vertical" margin={{ top: 20, right: 30, left: 0, bottom: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-          <XAxis type="number" tick={{ fontSize: 12 }} />
-          <YAxis dataKey={indexBy} type="category" tick={{ fontSize: 12 }} width={120} />
-          <Tooltip
-            formatter={(value: number) => [value.toLocaleString('pt-BR'), 'unidades']}
-            contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '8px' }}
-          />
-          <Legend />
-          <Bar dataKey="value" fill="hsl(var(--primary))" radius={[0, 4, 4, 0]} maxBarSize={40} />
+        <RechartsBarChart data={data} layout="vertical" margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" opacity={0.3} horizontal={false} />
+          <XAxis type="number" tick={{ fontSize: 12 }} tickFormatter={(v) => formatNumber(v)} />
+          <YAxis dataKey="name" type="category" tick={{ fontSize: 12 }} width={110} />
+          <Tooltip formatter={(value: number) => [formatNumber(value), unit]} contentStyle={tooltipStyle} />
+          <Bar dataKey="value" fill={BRAND_BLUE} radius={[0, 4, 4, 0]} maxBarSize={36} />
         </RechartsBarChart>
       </ResponsiveContainer>
     </div>
   );
 }
-

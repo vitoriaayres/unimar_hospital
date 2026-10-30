@@ -28,18 +28,28 @@ class PredictionBase(BaseModel):
 class PredictionCreate(PredictionBase):
     pass
 
+class PredictionProductRef(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    sku: str
+    name: str
+    generic_name: str | None = None
+    category: str
 
 class PredictionResponse(PredictionBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
     created_at: datetime
+    product: PredictionProductRef | None = None   
 
 
 class PredictionListParams(BaseModel):
     page: int = Field(default=1, ge=1)
     size: int = Field(default=20, ge=1, le=100)
     product_id: UUID | None = None
+    search: str | None = Field(default=None, max_length=100)
     model_version: str | None = None
     start_date: date | None = None
     end_date: date | None = None
@@ -85,3 +95,35 @@ class ModelComparison(BaseModel):
     training_date: datetime
     is_production: bool
     is_staging: bool
+
+
+class WeeklyPoint(BaseModel):
+    week: date
+    actual: float
+    predicted: float
+    baseline: float
+
+
+class CategoryError(BaseModel):
+    category: str
+    wape: float
+    baseline_wape: float
+    n: int
+
+
+class FeatureImportance(BaseModel):
+    feature: str
+    importance: float
+
+
+class TestPeriod(BaseModel):
+    start: date
+    end: date
+
+
+class ModelReport(BaseModel):
+    metrics: dict
+    test_period: TestPeriod
+    weekly: list[WeeklyPoint]
+    by_category: list[CategoryError]
+    feature_importance: list[FeatureImportance]

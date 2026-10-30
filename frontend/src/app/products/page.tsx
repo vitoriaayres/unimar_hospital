@@ -1,126 +1,65 @@
 'use client';
 
-import React from 'react';
-import { useState } from 'react';
 import Link from 'next/link';
-import { useRouter, useSearchParams } from 'next/navigation';
-import { useProducts, Product, ProductListParams, PRODUCT_CATEGORIES, getCategoryLabel } from '@/hooks/useProducts';
+import { useProducts, ProductListParams, PRODUCT_CATEGORIES, getCategoryLabel } from '@/hooks/useProducts';
+import { useUrlParams } from '@/hooks/useUrlParams';
 import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/Table';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
+import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
-import { Package, Search, Filter, ChevronLeft, ChevronRight, Plus, Loader2 } from 'lucide-react';
-import { cn, formatCurrency } from '@/lib/utils';
-import { debounce } from 'lodash-es';
+import { SearchInput } from '@/components/ui/SearchInput';
+import { Pagination } from '@/components/ui/Pagination';
+import { Package, Plus, Loader2, ScanLine } from 'lucide-react';
+import { formatCurrency } from '@/lib/utils';
 
 export default function ProductsPage() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const [search, setSearch] = useState(searchParams.get('search') || '');
-  const [category, setCategory] = useState(searchParams.get('category') || '');
-  const [page, setPage] = useState(Number(searchParams.get('page')) || 1);
-  const [debouncedSearch, setDebouncedSearch] = useState(search);
-
-  const debouncedSetSearch = React.useMemo(
-    () => debounce((value: string) => {
-      setDebouncedSearch(value);
-      const params = new URLSearchParams(searchParams);
-      if (value) params.set('search', value);
-      else params.delete('search');
-      params.set('page', '1');
-      router.push(`/products?${params.toString()}`);
-    }, 300),
-    [router, searchParams]
-  );
+  const url = useUrlParams();
+  const search = url.get('search');
+  const category = url.get('category');
 
   const params: ProductListParams = {
-    page,
+    page: url.page,
     size: 20,
-    search: debouncedSearch,
+    search: search || undefined,
     category: category || undefined,
   };
 
-  const { data, isLoading, error, refetch } = useProducts(params);
-
-  const handleSearchChange = (value: string) => {
-    setSearch(value);
-    debouncedSetSearch(value);
-  };
-
-  const handleCategoryChange = (value: string) => {
-    setCategory(value);
-    const params = new URLSearchParams(searchParams);
-    if (value) params.set('category', value);
-    else params.delete('category');
-    params.set('page', '1');
-    router.push(`/products?${params.toString()}`);
-  };
-
-  const handlePageChange = (newPage: number) => {
-    setPage(newPage);
-    const params = new URLSearchParams(searchParams);
-    params.set('page', newPage.toString());
-    router.push(`/products?${params.toString()}`);
-  };
-
-  if (isLoading && !data) {
-    return (
-      <div className="p-6">
-        <Card>
-          <CardContent className="py-12 text-center">
-            <Loader2 className="h-8 w-8 animate-spin mx-auto text-primary mb-2" />
-            <p className="text-muted-foreground">Carregando produtos...</p>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="p-6">
-        <Card>
-          <CardContent className="py-12 text-center text-destructive">
-            <p>Erro ao carregar produtos</p>
-            <Button variant="outline" onClick={() => refetch()} className="mt-2">
-              Tentar novamente
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
+  const { data, isLoading, isFetching, error, refetch } = useProducts(params);
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="space-y-6 p-4 lg:p-6">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Produtos</h1>
-          <p className="text-muted-foreground">Cadastro e gestão de medicamentos e insumos</p>
+          <p className="text-muted-foreground">Cadastro de medicamentos e insumos</p>
         </div>
-        <Link href="/products/new">
-          <Button>
-            <Plus className="mr-2 h-4 w-4" />
-            Novo Produto
-          </Button>
-        </Link>
+        <div className="flex gap-2">
+          <Link href="/products/scan">
+            <Button variant="outline">
+              <ScanLine className="mr-2 h-4 w-4" />
+              Ler código
+            </Button>
+          </Link>
+          <Link href="/products/new">
+            <Button>
+              <Plus className="mr-2 h-4 w-4" />
+              Novo produto
+            </Button>
+          </Link>
+        </div>
       </div>
 
       <Card>
         <CardHeader className="pb-2">
-          <div className="flex flex-col sm:flex-row gap-4">
-            <div className="relative flex-1 max-w-md">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Buscar por nome, SKU, princípio ativo..."
-                value={search}
-                onChange={(e) => handleSearchChange(e.target.value)}
-                className="pl-10"
-              />
-            </div>
-            <Select value={category} onValueChange={handleCategoryChange}>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <SearchInput
+              value={search}
+              onChange={(v) => url.set({ search: v })}
+              placeholder="Buscar por nome, SKU, princípio ativo ou código de barras..."
+              className="flex-1 sm:max-w-md"
+            />
+            <Select value={category} onValueChange={(v) => url.set({ category: v })}>
               <SelectTrigger className="w-full sm:w-[200px]">
                 <SelectValue placeholder="Todas as categorias" />
               </SelectTrigger>
@@ -133,24 +72,29 @@ export default function ProductsPage() {
                 ))}
               </SelectContent>
             </Select>
+            {isFetching && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
           </div>
         </CardHeader>
         <CardContent>
-          {data?.items.length === 0 ? (
-            <div className="text-center py-12">
-              <Package className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-              <h3 className="text-lg font-medium mb-1">Nenhum produto encontrado</h3>
-              <p className="text-muted-foreground mb-4">
+          {isLoading ? (
+            <div className="py-12 text-center">
+              <Loader2 className="mx-auto mb-2 h-8 w-8 animate-spin text-primary" />
+              <p className="text-muted-foreground">Carregando produtos...</p>
+            </div>
+          ) : error ? (
+            <div className="py-12 text-center text-destructive">
+              <p>Erro ao carregar produtos</p>
+              <Button variant="outline" onClick={() => refetch()} className="mt-2">
+                Tentar novamente
+              </Button>
+            </div>
+          ) : !data?.items.length ? (
+            <div className="py-12 text-center">
+              <Package className="mx-auto mb-4 h-12 w-12 text-muted-foreground" />
+              <h3 className="mb-1 text-lg font-medium">Nenhum produto encontrado</h3>
+              <p className="mb-4 text-muted-foreground">
                 {search || category ? 'Tente ajustar os filtros' : 'Cadastre o primeiro produto'}
               </p>
-              {!search && !category && (
-                <Link href="/products/new">
-                  <Button>
-                    <Plus className="mr-2 h-4 w-4" />
-                    Cadastrar Produto
-                  </Button>
-                </Link>
-              )}
             </div>
           ) : (
             <>
@@ -158,44 +102,48 @@ export default function ProductsPage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="w-10">SKU</TableHead>
-                      <TableHead>Nome</TableHead>
-                      <TableHead>Princípio Ativo</TableHead>
+                      <TableHead>Produto</TableHead>
+                      <TableHead className="hidden lg:table-cell">Código de barras</TableHead>
                       <TableHead className="hidden md:table-cell">Categoria</TableHead>
-                      <TableHead className="hidden lg:table-cell">Controlado</TableHead>
-                      <TableHead className="text-right">Custo Unit.</TableHead>
-                      <TableHead className="text-right">Estoque Mín.</TableHead>
-                      <TableHead className="w-32">Ações</TableHead>
+                      <TableHead className="hidden xl:table-cell">Controlado</TableHead>
+                      <TableHead className="text-right">Custo unit.</TableHead>
+                      <TableHead className="hidden text-right sm:table-cell">Estoque mín.</TableHead>
+                      <TableHead className="w-28" />
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {data?.items.map((product) => (
+                    {data.items.map((product) => (
                       <TableRow key={product.id} className="hover:bg-muted/50">
-                        <TableCell className="font-mono text-sm">{product.sku}</TableCell>
-                        <TableCell className="font-medium">{product.name}</TableCell>
-                        <TableCell className="text-muted-foreground">{product.generic_name || '-'}</TableCell>
+                        <TableCell>
+                          <Link href={`/products/${product.id}`} className="font-medium hover:underline">
+                            {product.name}
+                          </Link>
+                          <p className="text-xs text-muted-foreground">
+                            <span className="font-mono">{product.sku}</span>
+                            {product.generic_name && ` · ${product.generic_name}`}
+                          </p>
+                        </TableCell>
+                        <TableCell className="hidden font-mono text-xs lg:table-cell">{product.barcode || '—'}</TableCell>
                         <TableCell className="hidden md:table-cell">
                           <Badge variant="secondary" className="text-xs">
                             {getCategoryLabel(product.category)}
                           </Badge>
                         </TableCell>
-                        <TableCell className="hidden lg:table-cell text-center">
-                          {product.controlled_substance && (
-                            <Badge variant="destructive" className="text-xs">Sim</Badge>
+                        <TableCell className="hidden xl:table-cell">
+                          {product.controlled_substance ? (
+                            <Badge variant="destructive" className="text-xs">Controlado</Badge>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
                           )}
                         </TableCell>
-                        <TableCell className="text-right font-mono">
-                          {formatCurrency(product.unit_cost)}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {product.min_stock_level}
-                        </TableCell>
+                        <TableCell className="text-right font-mono">{formatCurrency(product.unit_cost)}</TableCell>
+                        <TableCell className="hidden text-right sm:table-cell">{product.min_stock_level}</TableCell>
                         <TableCell>
-                          <div className="flex items-center gap-2">
-                            <Link href={`/products/${product.id}`} className="text-primary hover:underline text-sm">
+                          <div className="flex items-center justify-end gap-3 text-sm">
+                            <Link href={`/products/${product.id}`} className="text-primary hover:underline">
                               Ver
                             </Link>
-                            <Link href={`/products/${product.id}/edit`} className="text-muted-foreground hover:text-foreground text-sm">
+                            <Link href={`/products/${product.id}/edit`} className="text-muted-foreground hover:text-foreground">
                               Editar
                             </Link>
                           </div>
@@ -205,32 +153,13 @@ export default function ProductsPage() {
                   </TableBody>
                 </Table>
               </div>
-
-              {data && data.pages > 1 && (
-                <div className="flex items-center justify-between mt-4">
-                  <p className="text-sm text-muted-foreground">
-                    Página {data.page} de {data.pages} — {data.total} produtos
-                  </p>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handlePageChange(page - 1)}
-                      disabled={page <= 1}
-                    >
-                      <ChevronLeft className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handlePageChange(page + 1)}
-                      disabled={page >= data.pages}
-                    >
-                      <ChevronRight className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-              )}
+              <Pagination
+                page={data.page}
+                pages={data.pages}
+                total={data.total}
+                label="produtos"
+                onPageChange={(p) => url.set({ page: p }, { resetPage: false })}
+              />
             </>
           )}
         </CardContent>

@@ -1,5 +1,7 @@
 """Test dashboard KPIs metric migration (MAPE -> WAPE)."""
 
+import json
+
 import pytest
 from httpx import AsyncClient
 
@@ -41,3 +43,39 @@ async def test_list_predictions_returns_paged_items(client: AsyncClient, auth_he
 
     payload = response.json()
     assert {'items', 'total', 'page', 'size', 'pages'} <= set(payload)
+
+
+@pytest.mark.asyncio
+async def test_model_report_returns_charts_data(
+    client: AsyncClient, auth_headers, tmp_path, monkeypatch
+):
+    from app.api.v1 import predictions
+
+    report = {
+        'metrics': {'wape': 0.14, 'baseline_wape': 0.19},
+        'test_period': {'start': '2025-08-01', 'end': '2026-10-22'},
+        'weekly': [{'week': '2025-08-04', 'actual': 100.0, 'predicted': 95.0, 'baseline': 90.0}],
+        'by_category': [{'category': 'antibiotic', 'wape': 0.12, 'baseline_wape': 0.18, 'n': 10}],
+        'feature_importance': [{'feature': 'lag_7', 'importance': 0.3}],
+    }
+    (tmp_path / 'model_report_production.json').write_text(json.dumps(report), encoding='utf-8')
+    monkeypatch.setattr(predictions, 'DATA_DIR', tmp_path)
+
+    response = await client.get('/api/v1/predictions/model-report', headers=auth_headers)
+    assert response.status_code == 200, response.text
+
+    payload = response.json()
+    assert payload['metrics']['wape'] < payload['metrics']['baseline_wape']
+    assert payload['weekly'][0]['predicted'] == 95.0
+
+
+@pytest.mark.asyncio
+async def test_model_report_missing_returns_404(
+    client: AsyncClient, auth_headers, tmp_path, monkeypatch
+):
+    from app.api.v1 import predictions
+
+    monkeypatch.setattr(predictions, 'DATA_DIR', tmp_path)
+
+    response = await client.get('/api/v1/predictions/model-report', headers=auth_headers)
+    assert response.status_code == 404
