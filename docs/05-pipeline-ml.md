@@ -26,7 +26,7 @@ flowchart LR
 | 2 | `ml/full_reset.py` | **Apaga o banco**, recria as tabelas (Alembic) e carrega a base fictícia; dá códigos de barras aos produtos | médio |
 | 3 | `ml/ajustar_estoque.py --aplicar` | Recalcula níveis e saldos de estoque a partir do consumo | leve |
 | 4 | `ml/run_pipeline.py` | Roda `features.py` → `train.py` → `predict.py` | **pesado** (treino) |
-| 5 | `ml/ajustar_estoque.py --alertas` | Refaz os alertas de falta com as novas previsões | leve |
+| 5 | `ml/ajustar_estoque.py --alertas` | Refaz os alertas de falta e de vencimento | leve |
 | 6 | `ml/report.py` | Gera os gráficos do modelo em `docs/imagens/` | leve |
 
 Atalhos que **não treinam** (servem depois de um `full_reset.py`, com o modelo já salvo):
@@ -132,6 +132,9 @@ a partir do consumo registrado, sem alterar o histórico:
 Aqui, `d` é o consumo médio diário dos últimos 90 dias, `σd` o desvio desse consumo, `L` o prazo
 de entrega e `σL` o desvio do prazo. O saldo atual vem da reprodução dos últimos 180 dias de
 consumo real sob essa política, com prazos de entrega sorteados e semente fixa.
+
+O gerador deixa todo o saldo em lotes de validade longa. Para a base simulada ter vencimentos
+reais, o script dá validades de 12 a 85 dias a 8 produtos com estoque folgado.
 
 Variáveis de estoque (mínimo, máximo, saldo, lotes e validade) não entram no modelo: são uma
 foto de hoje, não descrevem o passado e vazariam o período de teste.

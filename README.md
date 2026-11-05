@@ -48,7 +48,7 @@ uv run python ml/generate_data.py               # 1. gera a base fictícia (~20 
 uv run python ml/full_reset.py                  # 2. APAGA o banco e carrega a base (~8 min)
 uv run python ml/ajustar_estoque.py --aplicar   # 3. recalcula níveis e saldos de estoque
 uv run python ml/predict.py                     # 4. gera as previsões com o modelo salvo (~2 min)
-uv run python ml/ajustar_estoque.py --alertas   # 5. refaz os alertas de falta
+uv run python ml/ajustar_estoque.py --alertas   # 5. refaz os alertas
 cd ../frontend
 npm.cmd install
 ```
@@ -109,7 +109,7 @@ com o Postgres no ar. Detalhes em [docs/05-pipeline-ml.md](docs/05-pipeline-ml.m
 
 ```powershell
 uv run python ml/run_pipeline.py                # 1. features -> treino -> previsões (~3 min)
-uv run python ml/ajustar_estoque.py --alertas   # 2. refaz os alertas de falta
+uv run python ml/ajustar_estoque.py --alertas   # 2. refaz os alertas
 uv run python ml/report.py                      # 3. gráficos do modelo em docs/imagens/
 ```
 

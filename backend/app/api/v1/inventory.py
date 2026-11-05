@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from typing import Annotated
 from uuid import UUID
 
@@ -52,6 +52,7 @@ async def get_inventory_summary(
     expiring_days: int = Query(default=90, ge=1, le=365, description='Days until expiry to flag'),
 ) -> list[InventorySummary]:
     # Get all active products with their batch aggregates
+    today = date.today()
     query = (
         select(
             Product.id.label('product_id'),
@@ -78,22 +79,27 @@ async def get_inventory_summary(
                 ),
                 0,
             ).label('expired_quantity'),
-            func.count(InventoryBatch.id).label('batches_count'),
+            # Lotes vazios ficam no historico, mas nao contam como estoque nem como vencimento
+            func.count(InventoryBatch.id)
+            .filter(InventoryBatch.quantity > 0)
+            .label('batches_count'),
             func.count(InventoryBatch.id)
             .filter(
                 and_(
-                    InventoryBatch.expiry_date <= func.current_date() + expiring_days,
-                    InventoryBatch.expiry_date >= func.current_date(),
+                    InventoryBatch.expiry_date <= today + timedelta(days=30),
+                    InventoryBatch.expiry_date >= today,
                     InventoryBatch.status == BatchStatus.AVAILABLE,
+                    InventoryBatch.quantity > 0,
                 )
             )
             .label('batches_expiring_30d'),
             func.count(InventoryBatch.id)
             .filter(
                 and_(
-                    InventoryBatch.expiry_date <= func.current_date() + expiring_days,
-                    InventoryBatch.expiry_date >= func.current_date(),
+                    InventoryBatch.expiry_date <= today + timedelta(days=expiring_days),
+                    InventoryBatch.expiry_date >= today,
                     InventoryBatch.status == BatchStatus.AVAILABLE,
+                    InventoryBatch.quantity > 0,
                 )
             )
             .label('batches_expiring_90d'),

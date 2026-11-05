@@ -12,11 +12,14 @@ historico de consumo:
 O saldo atual sai da reproducao dos ultimos dias de consumo real sob essa
 politica, com prazos de entrega sorteados (semente fixa), em vez de ser escolhido.
 
+Como o gerador deixa todo o saldo em lotes de validade longa, alguns lotes recebem
+validades proximas (EXPIRY_DEMO_DAYS) para a base simulada ter vencimentos reais.
+
 Uso (a partir de backend/):
   python ml/ajustar_estoque.py             # simula e mostra o resultado
   python ml/ajustar_estoque.py --aplicar   # grava niveis e saldos
   python ml/run_pipeline.py                # retreina e gera previsoes
-  python ml/ajustar_estoque.py --alertas   # refaz os alertas de falta
+  python ml/ajustar_estoque.py --alertas   # refaz os alertas de falta e de vencimento
 """
 
 from __future__ import annotations
@@ -45,6 +48,9 @@ DB_URL = os.environ.get(
 DEMAND_WINDOW_DAYS = 90
 REPLAY_DAYS = 180
 SEED = 42
+EXPIRY_ALERT_DAYS = 90
+EXPIRY_DEMO_DAYS = (12, 19, 27, 38, 49, 61, 73, 85)
+EXPIRY_DEMO_MIN_COVERAGE_DAYS = 10
 
 
 def load_policy() -> dict:
@@ -209,6 +215,62 @@ def apply_plan(cur, plan: list[dict]) -> None:
             )
 
 
+def set_demo_expiries(cur, plan: list[dict]) -> None:
+    """Da validades proximas a produtos com estoque folgado, fora do risco de falta."""
+    candidates = [
+        item['product_id']
+        for item in plan
+        if item['daily'] > 0 and item['stock'] / item['daily'] >= EXPIRY_DEMO_MIN_COVERAGE_DAYS
+    ]
+    chosen = np.random.default_rng(SEED).choice(
+        candidates, size=len(EXPIRY_DEMO_DAYS), replace=False
+    )
+    for product_id, days in zip(chosen, EXPIRY_DEMO_DAYS, strict=True):
+        cur.execute(
+            """
+            UPDATE inventory_batches
+            SET expiry_date = current_date + %s, updated_at = now()
+            WHERE product_id = %s AND status = 'available' AND quantity > 0
+            """,
+            (days, str(product_id)),
+        )
+
+
+def rebuild_expiry_alerts(cur) -> None:
+    """Refaz os alertas de vencimento considerando so lotes com saldo."""
+    cur.execute("DELETE FROM alerts WHERE alert_type = 'expiry_risk'")
+    removed = cur.rowcount
+    cur.execute(
+        """
+        SELECT product_id::text, count(*), sum(quantity)
+        FROM inventory_batches
+        WHERE status = 'available' AND quantity > 0
+          AND expiry_date BETWEEN current_date AND current_date + %s
+        GROUP BY 1
+        """,
+        (EXPIRY_ALERT_DAYS,),
+    )
+    rows = cur.fetchall()
+    for product_id, batches, quantity in rows:
+        cur.execute(
+            """
+            INSERT INTO alerts
+                (id, product_id, alert_type, severity, message, alert_metadata, acknowledged)
+            VALUES (%s, %s, 'expiry_risk', 'warning', %s, %s, false)
+            """,
+            (
+                str(uuid4()),
+                product_id,
+                f'{batches} {"lote" if batches == 1 else "lotes"} vencendo em '
+                f'{EXPIRY_ALERT_DAYS} dias ({quantity} unidades)',
+                psycopg2.extras.Json(
+                    {'total_quantity': int(quantity), 'expiring_batches': batches}
+                ),
+            ),
+        )
+    print(f'   Vencimento: {removed} removidos, {len(rows)} criados')
+
+
 def rebuild_shortage_alerts(cur) -> None:
     """Refaz os alertas de falta com o mesmo criterio do KPI do painel."""
     cur.execute(
@@ -263,13 +325,14 @@ def rebuild_shortage_alerts(cur) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument('--aplicar', action='store_true', help='grava niveis e saldos no banco')
-    parser.add_argument('--alertas', action='store_true', help='refaz os alertas de falta')
+    parser.add_argument('--alertas', action='store_true', help='refaz os alertas')
     args = parser.parse_args()
 
     with psycopg2.connect(DB_URL) as conn, conn.cursor() as cur:
         if args.alertas:
-            print('=== Refazendo alertas de falta ===')
+            print('=== Refazendo alertas ===')
             rebuild_shortage_alerts(cur)
+            rebuild_expiry_alerts(cur)
             return
 
         print('=== Politica de estoque ===')
@@ -277,6 +340,7 @@ def main() -> None:
         print_summary(plan)
         if args.aplicar:
             apply_plan(cur, plan)
+            set_demo_expiries(cur, plan)
             print('\n   Niveis e saldos gravados.')
         else:
             print('\n   Simulacao: nada foi gravado. Use --aplicar para gravar.')
