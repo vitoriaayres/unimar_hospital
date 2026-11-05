@@ -5,7 +5,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import and_, func, select
+from sqlalchemy import Float, and_, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
@@ -193,11 +193,14 @@ async def get_stockout_risk(
         # Menor cobertura primeiro: estoque / previsao de 7 dias
         .order_by(
             (
-                func.coalesce(
-                    func.sum(InventoryBatch.quantity).filter(
-                        InventoryBatch.status == BatchStatus.AVAILABLE
+                cast(
+                    func.coalesce(
+                        func.sum(InventoryBatch.quantity).filter(
+                            InventoryBatch.status == BatchStatus.AVAILABLE
+                        ),
+                        0,
                     ),
-                    0,
+                    Float,
                 )
                 / func.greatest(func.coalesce(Prediction.predicted_quantity, 0), 1)
             ).asc()

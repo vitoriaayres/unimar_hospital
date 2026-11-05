@@ -416,6 +416,13 @@ def prepare_train_test(
         'category',
         'atc_code',
         'nearest_expiry',
+        # Foto do estoque de hoje repetida em todo o historico: nao descreve o passado
+        # e, como os niveis derivam do consumo recente, vazaria o periodo de teste.
+        'min_stock_level',
+        'max_stock_level',
+        'current_stock',
+        'batch_count',
+        'days_to_expiry',
     }
     feature_cols = [c for c in features.columns if c not in exclude]
 

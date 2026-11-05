@@ -78,8 +78,10 @@ Tudo roda a partir de `backend/`, com o Postgres no ar. Detalhes em
 ```powershell
 uv run python ml/generate_data.py   # 1. gera a base fictícia (ml/config/data_generation.yaml)
 uv run python ml/full_reset.py      # 2. APAGA o banco e carrega a base fictícia
-uv run python ml/run_pipeline.py    # 3. features -> treino -> previsões
-uv run python ml/report.py          # 4. gráficos do modelo em docs/imagens/
+uv run python ml/ajustar_estoque.py --aplicar   # 3. recalcula níveis e saldos de estoque
+uv run python ml/run_pipeline.py    # 4. features -> treino -> previsões
+uv run python ml/ajustar_estoque.py --alertas   # 5. refaz os alertas de falta
+uv run python ml/report.py          # 6. gráficos do modelo em docs/imagens/
 ```
 
 O resultado aparece na tela **Modelo** (`/model`) do sistema.
