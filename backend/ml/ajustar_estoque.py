@@ -87,9 +87,7 @@ def load_daily_consumption(cur) -> dict[str, np.ndarray]:
 def compute_levels(daily: np.ndarray, lead_time: int, policy: dict) -> dict:
     recent = daily[-DEMAND_WINDOW_DAYS:]
     demand, sigma = float(recent.mean()), float(recent.std())
-    safety = policy['z'] * sqrt(
-        lead_time * sigma**2 + demand**2 * policy['lead_time_std'] ** 2
-    )
+    safety = policy['z'] * sqrt(lead_time * sigma**2 + demand**2 * policy['lead_time_std'] ** 2)
     reorder_point = demand * lead_time + safety
     maximum = reorder_point + demand * policy['review_days']
     return {
@@ -252,6 +250,7 @@ def rebuild_expiry_alerts(cur) -> None:
     )
     rows = cur.fetchall()
     for product_id, batches, quantity in rows:
+        label = '1 lote' if batches == 1 else f'{batches} lotes'
         cur.execute(
             """
             INSERT INTO alerts
@@ -261,8 +260,7 @@ def rebuild_expiry_alerts(cur) -> None:
             (
                 str(uuid4()),
                 product_id,
-                f'{batches} {"lote" if batches == 1 else "lotes"} vencendo em '
-                f'{EXPIRY_ALERT_DAYS} dias ({quantity} unidades)',
+                f'{label} vencendo em {EXPIRY_ALERT_DAYS} dias ({quantity} unidades)',
                 psycopg2.extras.Json(
                     {'total_quantity': int(quantity), 'expiring_batches': batches}
                 ),
