@@ -45,3 +45,6 @@ backend/.cli_token
 
 # Logs
 *.log
+
+# Claude Code
+.claude/
